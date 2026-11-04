@@ -5,17 +5,11 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import crypto from "crypto"
-import nodemailer from "nodemailer"
+import { createSmtpTransport } from "@/lib/email/smtp"
 import { dbQuery } from "@/lib/db"
 import { isValidRussianPhone, normalizeRussianPhone } from "@/lib/utils/phone"
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-})
+const transporter = createSmtpTransport()
 
 function generatePassword(length = 12): string {
   // Ambiguous characters (0/O, 1/l/I) are excluded so a password sent by
@@ -173,6 +167,14 @@ export async function signUp(formData: {
     })
   } catch (emailError) {
     console.error("Failed to send password email:", emailError)
+    // The account already exists. Give its creator access even if SMTP is
+    // unavailable, without claiming that an email was sent.
+    return {
+      success: true,
+      message: "Аккаунт создан, но письмо отправить не удалось. Сохраните пароль ниже и используйте его для входа.",
+      password,
+      userId: data.user?.id,
+    }
   }
 
   // A new customer should enter the same isolated account context immediately.
@@ -237,14 +239,8 @@ export async function resetPassword(formData: { email: string; customerType?: "i
 
   const newPassword = generatePassword()
 
-  const { error } = await adminClient.auth.admin.updateUserById(user.id, {
-    password: newPassword,
-  })
-
-  if (error) {
-    return { error: "Не удалось сбросить пароль" }
-  }
-
+  // Do not invalidate the current password when SMTP cannot accept the email.
+  // Only apply the generated password after the send operation succeeds.
   try {
     await transporter.sendMail({
       from: `"10coffee" <${process.env.SMTP_EMAIL}>`,
@@ -266,6 +262,15 @@ export async function resetPassword(formData: { email: string; customerType?: "i
     })
   } catch (emailError) {
     console.error("Failed to send reset email:", emailError)
+    return { error: "Не удалось отправить письмо. Пароль не изменён. Попробуйте позже." }
+  }
+
+  const { error } = await adminClient.auth.admin.updateUserById(user.id, {
+    password: newPassword,
+  })
+
+  if (error) {
+    return { error: "Не удалось изменить пароль. Повторите восстановление пароля." }
   }
 
   return { success: true, message: `Новый пароль отправлен на ${email}` }

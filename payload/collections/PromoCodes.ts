@@ -2,17 +2,10 @@ import type { CollectionConfig } from "payload"
 import { canManageOperations, canReadOperations, operationsDeleteAccess } from "../access/adminRoles"
 import { promoWorkspaceBaseFilter } from "../admin/workspace"
 import { randomBytes } from "crypto"
-import nodemailer from "nodemailer"
+import { createSmtpTransport } from "@/lib/email/smtp"
 import { PROMO_PRESETS } from "../promo-presets"
 
-const smtpTransporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com",
-  port: 587,
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-})
+const smtpTransporter = createSmtpTransport()
 
 function createPromoSuffix() {
   return randomBytes(3).toString("hex").toUpperCase()

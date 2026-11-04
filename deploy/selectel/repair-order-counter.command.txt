@@ -1,0 +1,69 @@
+# Paste the entire block into Coolify -> 10coffee application -> Terminal.
+# Reads current MoySklad numbers and raises only the site's order-number sequence.
+# Existing orders and MoySklad documents are not modified. No secrets are printed.
+# Requires new-order export to remain disabled until this check has completed.
+node <<'NODE'
+(async () => {
+  const e = process.env;
+  if (!["false", "0", "no", "off"].includes((e.MOYSKLAD_SYNC_ORDERS_ON_CREATE || "").toLowerCase())) {
+    throw Error("Keep MOYSKLAD_SYNC_ORDERS_ON_CREATE=false during counter repair");
+  }
+  const token = e.MOYSKLAD_TOKEN?.trim();
+  const auth = token ? "Bearer " + token : e.MOYSKLAD_LOGIN && e.MOYSKLAD_PASSWORD
+    ? "Basic " + Buffer.from(e.MOYSKLAD_LOGIN + ":" + e.MOYSKLAD_PASSWORD).toString("base64") : null;
+  if (!auth) throw Error("MoySklad credentials are missing from Runtime");
+  const number = value => {
+    const m = String(value || "").match(/^10C-([0-9]+)$/);
+    if (!m) return 0;
+    const n = Number(m[1]);
+    if (!Number.isSafeInteger(n) || n >= 2147483647) throw Error("Order number exceeds the supported range");
+    return n;
+  };
+  let highest = 0, checked = 0, complete = false;
+  for (let page = 0; page < 20; page++) {
+    const r = await fetch("https://api.moysklad.ru/api/remap/1.2/entity/customerorder?limit=1000&offset=" + page * 1000,
+      { headers: { Authorization: auth, "Accept-Encoding": "gzip" }, signal: AbortSignal.timeout(20000) });
+    const data = await r.json();
+    if (!r.ok || !Array.isArray(data.rows)) throw Error("MoySklad read failed: HTTP " + r.status);
+    for (const order of data.rows) highest = Math.max(highest, number(order.name));
+    checked += data.rows.length;
+    if (data.rows.length < 1000) { complete = true; break; }
+  }
+  if (!complete || highest === 0) throw Error("MoySklad numbering was not fully verified; counter was not changed");
+  const db = new (require("pg").Client)({ connectionString: e.DATABASE_URL, ssl: false, connectionTimeoutMillis: 10000 });
+  try {
+    await db.connect();
+    await db.query("BEGIN");
+    await db.query("SET LOCAL lock_timeout='10s'");
+    await db.query("SET LOCAL statement_timeout='20s'");
+    const config = (await db.query("SELECT seqincrement::int AS increment,seqcache::int AS cache,seqmax::text AS max FROM pg_sequence WHERE seqrelid='public.order_number_seq'::regclass")).rows[0];
+    if (config?.increment !== 1 || config.cache !== 1) throw Error("Unexpected sequence settings; counter was not changed");
+    // Same increment: acquire the sequence lock before reading its current value.
+    await db.query("ALTER SEQUENCE public.order_number_seq INCREMENT BY 1");
+    const state = (await db.query("SELECT last_value,is_called FROM public.order_number_seq")).rows[0];
+    const previousNext = Number(state.last_value) + Number(state.is_called);
+    const local = (await db.query("SELECT order_id FROM public.orders")).rows;
+    const localHighest = local.reduce((max, row) => Math.max(max, number(row.order_id)), 0);
+    const next = Math.max(previousNext, localHighest + 1, highest + 1);
+    if (!Number.isSafeInteger(next) || next > Math.min(Number(config.max), 2147483647)) throw Error("Counter value exceeds the supported range");
+    if (next > previousNext) await db.query("ALTER SEQUENCE public.order_number_seq RESTART WITH " + next);
+    await db.query("COMMIT");
+    console.log(JSON.stringify({ ok: true, previousNext, nextSiteNumber: next, highestSiteNumber: localHighest,
+      highestMoyskladNumber: highest, remoteOrdersChecked: checked, changed: next > previousNext,
+      nextOrder: "10C-" + String(next).padStart(5, "0"), config: {
+        enabled: e.MOYSKLAD_ENABLED,
+        exportNewOrders: e.MOYSKLAD_SYNC_ORDERS_ON_CREATE,
+        organizationId: e.MOYSKLAD_ORGANIZATION_ID,
+        storeId: e.MOYSKLAD_STORE_ID,
+        deliveryServiceId: e.MOYSKLAD_DELIVERY_SERVICE_ID,
+        wholesaleSalesChannelId: e.MOYSKLAD_WHOLESALE_SALES_CHANNEL_ID,
+        retailSalesChannelId: e.MOYSKLAD_RETAIL_SALES_CHANNEL_ID,
+      } }, null, 2));
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    await db.end().catch(() => {});
+  }
+})().catch(error => { console.error(error.code || error.message); process.exitCode = 1; });
+NODE

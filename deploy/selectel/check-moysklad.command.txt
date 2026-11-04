@@ -1,0 +1,72 @@
+# Paste this entire block into Coolify -> 10coffee application -> Terminal.
+# Read-only database queries and GET requests to MoySklad. No credentials printed.
+node --input-type=module <<'NODE'
+import pg from "pg";
+import fs from "node:fs";
+const e = process.env;
+const token = e.MOYSKLAD_TOKEN?.trim();
+const auth = token ? "Bearer " + token : e.MOYSKLAD_LOGIN && e.MOYSKLAD_PASSWORD
+  ? "Basic " + Buffer.from(e.MOYSKLAD_LOGIN + ":" + e.MOYSKLAD_PASSWORD).toString("base64") : null;
+if (!auth) throw Error("MoySklad credentials are missing from Runtime");
+const base = "https://api.moysklad.ru/api/remap/1.2/";
+const maxNumber = values => values.reduce((max, value) => {
+  const match = String(value || "").match(/^10C-(\d+)$/);
+  const number = match ? Number(match[1]) : 0;
+  return Number.isSafeInteger(number) ? Math.max(max, number) : max;
+}, 0);
+async function get(path) {
+  const r = await fetch(base + path, { headers: { Authorization: auth, "Accept-Encoding": "gzip" }, signal: AbortSignal.timeout(20000) });
+  const data = await r.json();
+  if (!r.ok) throw Error("MoySklad HTTP " + r.status + "; codes=" + (data.errors || []).map(x => x.code).join(","));
+  return data;
+}
+const processes = fs.readdirSync("/proc").filter(x => /^\d+$/.test(x)).flatMap(id => {
+  try { return [fs.readFileSync("/proc/" + id + "/cmdline", "utf8").split("\u0000")]; } catch { return []; }
+});
+const report = { config: {
+  enabled: e.MOYSKLAD_ENABLED,
+  exportNewOrders: e.MOYSKLAD_SYNC_ORDERS_ON_CREATE,
+  organizationId: e.MOYSKLAD_ORGANIZATION_ID,
+  storeId: e.MOYSKLAD_STORE_ID,
+  deliveryServiceId: e.MOYSKLAD_DELIVERY_SERVICE_ID,
+  wholesaleSalesChannelId: e.MOYSKLAD_WHOLESALE_SALES_CHANNEL_ID,
+  retailSalesChannelId: e.MOYSKLAD_RETAIL_SALES_CHANNEL_ID,
+  startWrapperRunning: processes.some(args => args.slice(1).some(arg => /(^|\/)start-with-status-sync\.mjs$/.test(arg) && !/\s/.test(arg))),
+} };
+const db = new pg.Client({ connectionString: e.DATABASE_URL, ssl: false, connectionTimeoutMillis: 10000 });
+try {
+  await db.connect();
+  await db.query("BEGIN READ ONLY");
+  await db.query("SET LOCAL statement_timeout='10s'");
+  const ids = (await db.query("SELECT order_id FROM public.orders")).rows;
+  const seq = (await db.query("SELECT last_value,is_called FROM public.order_number_seq")).rows[0];
+  report.database = { orders: ids.length, highestSiteNumber: maxNumber(ids.map(x => x.order_id)), nextSiteNumber: Number(seq.last_value) + Number(seq.is_called) };
+  const linked = (await db.query("SELECT order_id,status,payment_status,moysklad_customer_order_id FROM public.orders WHERE nullif(moysklad_customer_order_id,'') IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 1")).rows[0];
+  await db.query("ROLLBACK");
+  if (linked) {
+    try {
+      if (!/^[a-f0-9-]{36}$/i.test(linked.moysklad_customer_order_id)) throw Error("Invalid linked order UUID");
+      const order = await get("entity/customerorder/" + linked.moysklad_customer_order_id + "?expand=state");
+      const ref = value => value?.meta?.href?.split("/").pop();
+      report.statusExample = { siteOrder: linked.order_id, siteStatus: linked.status, sitePaymentStatus: linked.payment_status, moyskladState: order.state?.name, moyskladOrganizationId: ref(order.organization), moyskladStoreId: ref(order.store), moyskladSalesChannelId: ref(order.salesChannel) };
+    } catch (error) {
+      report.statusExample = { siteOrder: linked.order_id, error: error.code || error.message };
+    }
+  }
+  let highest = 0, checked = 0, complete = false;
+  for (let page = 0; page < 20; page++) {
+    const data = await get("entity/customerorder?limit=1000&offset=" + page * 1000);
+    const rows = data.rows || [];
+    highest = Math.max(highest, maxNumber(rows.flatMap(x => [x.name, x.externalCode])));
+    checked += rows.length;
+    if (rows.length < 1000) { complete = true; break; }
+  }
+  report.numbering = { remoteOrdersChecked: checked, remoteScanComplete: complete, highestMoyskladNumber: highest, siteCounterAboveMoysklad: complete && report.database.nextSiteNumber > highest };
+} catch (error) {
+  report.error = error.code || error.message;
+  process.exitCode = 1;
+} finally {
+  await db.end().catch(() => {});
+}
+console.log(JSON.stringify(report, null, 2));
+NODE

@@ -36,6 +36,7 @@ function fixture({ admin = null, customer = null, payloadOverrides = {}, extraMo
     ...extraMocks,
   }
   const actual = new Set([
+    'lib/email/smtp.ts',
     'lib/auth/payload-admin.ts', 'payload/access/adminRoles.ts',
     'lib/auth/profile-input.ts', 'lib/company-input.ts', 'lib/utils/phone.ts',
     'lib/discounts.ts', 'lib/product-types.ts',

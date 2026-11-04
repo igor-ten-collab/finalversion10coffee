@@ -954,9 +954,13 @@ export async function retryFailedMoyskladOrders(payload: Payload, options: Retry
           ],
         }
 
-  const where: Where = statusWhere
-    ? { and: [moyskladExportEligibilityWhere, statusWhere] }
-    : moyskladExportEligibilityWhere
+  // A selection must also load ineligible orders so the admin can see why
+  // they were skipped. Background batches still filter before pagination.
+  const where: Where = orderIds
+    ? { id: { in: orderIds } }
+    : statusWhere
+      ? { and: [moyskladExportEligibilityWhere, statusWhere] }
+      : moyskladExportEligibilityWhere
 
   const orders: PayloadOrderDoc[] = []
   let page = 1
@@ -1027,6 +1031,18 @@ export async function retryFailedMoyskladOrders(payload: Payload, options: Retry
     total: toSync.length,
     current: 0,
   })
+
+  if (orderIds) {
+    for (const order of orders) {
+      if (!isExcludedFromRetry(order) && !canExportOrderToMoysklad(order)) {
+        emit({
+          type: "order_done",
+          orderId: order.orderId,
+          message: `${order.orderId || order.id}: пропущен — оплата не подтверждена. Розничные заказы выгружаются после оплаты.`,
+        })
+      }
+    }
+  }
 
   for (let i = 0; i < toSync.length; i++) {
     const order = toSync[i]

@@ -1,7 +1,8 @@
 "use server";
 
 import { z } from "zod";
-import nodemailer, { type SendMailOptions } from "nodemailer";
+import type { SendMailOptions } from "nodemailer";
+import { createSmtpTransport } from "@/lib/email/smtp";
 import { getPayload } from "payload";
 import configPromise from "@payload-config";
 
@@ -19,13 +20,7 @@ export type PriceListState = {
   name?: string;
 };
 
-const smtpTransporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-});
+const smtpTransporter = createSmtpTransport();
 
 export async function submitPriceListRequest(
   _prev: PriceListState,

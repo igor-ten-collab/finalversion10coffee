@@ -64,7 +64,7 @@ function fixture(overrides = {}) {
     '@/components/auth/auth-modal-store': { openAuthModal() {} },
     'next/navigation': { useRouter: () => ({ push() { throw new Error('Repeat must open the cart without navigating') } }) },
   }
-  const actual = new Set(['lib/actions/orders.ts', 'lib/actions/cart.ts', 'lib/utils.ts',
+  const actual = new Set(['lib/email/smtp.ts', 'lib/actions/orders.ts', 'lib/actions/cart.ts', 'lib/utils.ts',
     'lib/utils/format.ts', 'lib/utils/constants.ts', 'lib/utils/plural.ts', 'lib/utils/cdek-tracking.ts',
     'providers/guest-cart-provider.tsx', 'components/dashboard/orders-list.tsx',
     'components/shop/retail-orders-list.tsx', 'components/shop/shop-header.tsx'])

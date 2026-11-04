@@ -1159,6 +1159,30 @@ function matchesWhere(doc, where) {
   })
 }
 
+for (const forceSelected of [false, true]) {
+  test(`selected unpaid retail is found and explains why it is skipped (force=${forceSelected})`, async () => {
+    const unpaid = { ...retryOrder(448, '10C-00542'), salesChannel: 'retail', paymentStatus: 'pending', status: 'cancelled' }
+    const paid = { ...retryOrder(449, 'OTHER-PAID'), salesChannel: 'retail', paymentStatus: 'paid' }
+    const f = retryFixture([unpaid, paid])
+    const before = clone(unpaid)
+    const originalFind = f.payload.find
+    f.payload.find = async input => input.collection === 'orders'
+      ? { docs: [unpaid, paid].filter(order => matchesWhere(order, input.where)), totalPages: 1 }
+      : originalFind(input)
+    const result = await f.run({ orderIds: [448], forceSelected })
+    assert.equal(result.checked, 1)
+    assert.equal(result.excludedCount, 1)
+    assert.equal(result.skippedTotal, 1)
+    assert.equal(result.succeeded, 0)
+    assert.equal(result.failed, 0)
+    assert.match(f.events[0].message, /отмечено 1, найдено в базе 1/)
+    assert.ok(f.events.some(event => /10C-00542: пропущен.*оплата не подтверждена/.test(event.message)))
+    assert.equal(f.calls.length, 0)
+    assert.equal(f.updates.length, 0)
+    assert.deepEqual(clone(unpaid), before)
+  })
+}
+
 test('unpaid retail orders cannot fill the background batch before a paid order', async () => {
   const unpaid = Array.from({ length: 30 }, (_, index) => ({
     ...retryOrder(index + 1, `UNPAID-${index}`), salesChannel: 'retail', paymentStatus: 'pending',

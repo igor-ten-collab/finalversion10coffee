@@ -1,0 +1,63 @@
+# Coolify -> 10coffee -> Terminal. Read-only: no messages or password changes.
+# Tests configured SMTP connectivity, then authentication. Stops within 25 seconds.
+node <<'NODE'
+const net = require('node:net');
+const dns = require('node:dns').promises;
+const mailer = require('nodemailer');
+let phase = 'dns';
+const deadline = setTimeout(() => {
+  console.log(JSON.stringify({ ok: false, phase, code: 'OVERALL_TIMEOUT' }));
+  process.exit(1);
+}, 25000);
+const tcp = (address, port) => new Promise(resolve => {
+  const socket = net.createConnection({ host: address, port });
+  let done = false;
+  const finish = code => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    socket.destroy();
+    resolve({ port, connected: code === null, ...(code ? { code } : {}) });
+  };
+  const timer = setTimeout(() => finish('TCP_TIMEOUT'), 5000);
+  socket.once('connect', () => finish(null));
+  socket.once('error', error => finish(error.code || error.name));
+});
+(async () => {
+  const e = process.env;
+  const customHost = e.SMTP_HOST?.trim();
+  const host = customHost || 'smtp.gmail.com';
+  const port = customHost ? Number(e.SMTP_PORT?.trim() || '465') : 465;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error('INVALID_SMTP_PORT');
+  const secureValue = e.SMTP_SECURE?.trim().toLowerCase();
+  if (customHost && secureValue && !['true', 'false'].includes(secureValue)) throw Error('INVALID_SMTP_SECURE');
+  const secure = customHost ? (secureValue ? secureValue === 'true' : port === 465) : true;
+  const user = e.SMTP_USER?.trim() || e.SMTP_EMAIL?.trim();
+  console.log(JSON.stringify({ phase, host, port, secure, smtpEmailConfigured: Boolean(e.SMTP_EMAIL), smtpUserConfigured: Boolean(user), smtpPasswordConfigured: Boolean(e.SMTP_PASSWORD) }));
+  const addresses = await dns.resolve4(host);
+  if (!addresses.length) throw Error('NO_IPV4_ADDRESS');
+  console.log(JSON.stringify({ dnsResolved: true }));
+  phase = 'tcp';
+  const connections = [await tcp(addresses[0], port)];
+  console.log(JSON.stringify({ connections }));
+  if (!connections[0].connected) { process.exitCode = 1; return; }
+  if (!user || !e.SMTP_PASSWORD) throw Error('SMTP_CREDENTIALS_MISSING');
+  phase = 'smtpVerify';
+  const transport = mailer.createTransport({
+    host: addresses[0], port, secure,
+    requireTLS: !secure, tls: { servername: host },
+    auth: { user, pass: e.SMTP_PASSWORD },
+    connectionTimeout: 5000, greetingTimeout: 5000, socketTimeout: 7000,
+  });
+  try {
+    await transport.verify();
+    console.log(JSON.stringify({ smtpVerified: true, port }));
+  } catch (error) {
+    console.log(JSON.stringify({ smtpVerified: false, port, code: error.code || error.name, responseCode: error.responseCode, command: error.command }));
+    process.exitCode = 1;
+  } finally {
+    transport.close();
+  }
+})().catch(error => { console.log(JSON.stringify({ ok: false, phase, code: error.code || error.message })); process.exitCode = 1; })
+  .finally(() => { clearTimeout(deadline); process.exit(process.exitCode || 0); });
+NODE

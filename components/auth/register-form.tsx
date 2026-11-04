@@ -69,7 +69,7 @@ export function RegisterForm({ onSwitchToLogin, onAuthenticated, customerType }:
             <p className="text-[18px] font-mono font-bold text-neutral-900 tracking-wider select-all">
               {generatedPassword}
             </p>
-            <p className="text-[11px] text-neutral-400">Сохраните его — он также отправлен на почту</p>
+            <p className="text-[11px] text-neutral-400">Сохраните его в надёжном месте</p>
           </div>
         )}
         <Button onClick={onSwitchToLogin} className="rounded-xl font-bold">

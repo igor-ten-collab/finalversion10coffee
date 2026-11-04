@@ -1,15 +1,9 @@
 "use server";
 
 import { z } from "zod";
-import nodemailer from "nodemailer";
+import { createSmtpTransport } from "@/lib/email/smtp";
 
-const smtpTransporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-});
+const smtpTransporter = createSmtpTransport();
 
 const serviceSchema = z.object({
   name: z.string().min(2, "Введите имя"),

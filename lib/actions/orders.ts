@@ -16,7 +16,7 @@ import {
 } from "@/lib/discounts"
 import { getRelationshipId } from "@/lib/product-types"
 import { revalidatePath } from "next/cache"
-import nodemailer from "nodemailer"
+import { createSmtpTransport } from "@/lib/email/smtp"
 import type { Order, OrderItem, OrderStatus, DeliveryMethod } from "@/types"
 import { buildMoyskladStockLossLines, syncOrderToMoysklad } from "@/lib/moysklad/sync"
 import type { CustomerSessionScope } from "@/lib/auth/constants"
@@ -139,13 +139,7 @@ interface SupabaseCompanyRow {
   moysklad_counterparty_id?: string | null
 }
 
-const smtpTransporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-})
+const smtpTransporter = createSmtpTransport()
 
 const INVOICE_SELLER = {
   name: 'ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ "ПЕЙДЖ КОФЕ"',
