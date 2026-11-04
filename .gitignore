@@ -45,3 +45,5 @@ public/uploads/avatars/*.jpg
 *.tsbuildinfo
 next-env.d.ts
 *.md
+/recovery-data/
+!/deploy/selectel/RECOVERY.md
