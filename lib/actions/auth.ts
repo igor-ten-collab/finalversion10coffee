@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 import crypto from "crypto"
-import { createSmtpTransport } from "@/lib/email/smtp"
+import { createSmtpTransport, sendSmtpMail } from "@/lib/email/smtp"
 import { dbQuery } from "@/lib/db"
 import { isValidRussianPhone, normalizeRussianPhone } from "@/lib/utils/phone"
 
@@ -146,7 +146,7 @@ export async function signUp(formData: {
     ? "shop.10coffee.ru"
     : "10coffee.ru"
   try {
-    await transporter.sendMail({
+    await sendSmtpMail(transporter, "registration", {
       from: `"10coffee" <${process.env.SMTP_EMAIL}>`,
       to: email,
       subject: "Ваш логин и пароль для входа в личный кабинет 10coffee",
@@ -165,8 +165,7 @@ export async function signUp(formData: {
         </div>
       `,
     })
-  } catch (emailError) {
-    console.error("Failed to send password email:", emailError)
+  } catch {
     // The account already exists. Give its creator access even if SMTP is
     // unavailable, without claiming that an email was sent.
     return {
@@ -242,7 +241,7 @@ export async function resetPassword(formData: { email: string; customerType?: "i
   // Do not invalidate the current password when SMTP cannot accept the email.
   // Only apply the generated password after the send operation succeeds.
   try {
-    await transporter.sendMail({
+    await sendSmtpMail(transporter, "password-reset", {
       from: `"10coffee" <${process.env.SMTP_EMAIL}>`,
       to: email,
       subject: "Новый пароль для входа в личный кабинет 10coffee",
@@ -260,8 +259,7 @@ export async function resetPassword(formData: { email: string; customerType?: "i
         </div>
       `,
     })
-  } catch (emailError) {
-    console.error("Failed to send reset email:", emailError)
+  } catch {
     return { error: "Не удалось отправить письмо. Пароль не изменён. Попробуйте позже." }
   }
 

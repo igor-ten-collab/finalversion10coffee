@@ -46,7 +46,7 @@ function fixture({ mailError = false, updateError = false, customerType = 'busin
     cache.set(file, loadedModule)
     vm.runInNewContext(`(function(require,module,exports){${compile(file)}\n})`, {
       process: { env: { SMTP_EMAIL: 'sender@example.invalid', SMTP_PASSWORD: 'test-only', ...smtpEnv } },
-      console: { error() {} },
+      console: { error() {}, info() {} },
     }, { filename: file })(id => {
       if (id === '@/lib/email/smtp') return load('lib/email/smtp.ts')
       if (!Object.hasOwn(mocks, id)) throw Error(`Unexpected dependency: ${id}`)

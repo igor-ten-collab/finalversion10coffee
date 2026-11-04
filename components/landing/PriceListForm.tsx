@@ -88,11 +88,18 @@ export default function PriceListForm() {
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalIcon}>✓</div>
             <h4 className={styles.modalTitle}>
-              {state.name ? `${state.name}, письмо отправлено!` : "Письмо отправлено!"}
+              {state.emailSent
+                ? (state.name ? `${state.name}, письмо отправлено!` : "Письмо отправлено!")
+                : (state.name ? `${state.name}, заявка получена!` : "Заявка получена!")}
             </h4>
             <p className={styles.modalText}>
-              Прайс-лист 10кофе уже летит к вам на почту.<br />
-              Если письмо не пришло — проверьте папку «Спам».
+              {state.emailSent ? <>
+                Письмо с прайс-листом отправлено на указанный email.<br />
+                Если письмо не пришло — проверьте папку «Спам».
+              </> : <>
+                Заявка сохранена, но отправить прайс-лист не удалось.<br />
+                Свяжитесь с нами, чтобы получить файл.
+              </>}
             </p>
             <button className={styles.modalClose} onClick={() => setSuccessDismissed(true)}>
               Закрыть

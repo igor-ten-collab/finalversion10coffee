@@ -1,0 +1,50 @@
+# Coolify -> 10coffee -> Terminal. No database changes or secrets printed.
+# Each existing upload directory gets one uniquely named temporary file;
+# the probe reads it back and removes only the file it just created.
+node <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const e = process.env;
+const mountPoints = fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n').map(line => line.split(' ')[4]);
+const report = {
+  commit: e.SOURCE_COMMIT || null,
+  uid: process.getuid?.(),
+  storage: {
+    s3BucketConfigured: Boolean(e.S3_BUCKET?.trim()),
+    s3EndpointConfigured: Boolean(e.S3_ENDPOINT?.trim()),
+    s3AccessKeyConfigured: Boolean(e.S3_ACCESS_KEY_ID?.trim()),
+    s3SecretKeyConfigured: Boolean(e.S3_SECRET_ACCESS_KEY?.trim()),
+  },
+  directories: [],
+};
+for (const name of ['media', 'job-application-files', 'public/uploads/avatars']) {
+  const directory = path.resolve(name);
+  const info = { directory, exists: fs.existsSync(directory), exactMount: mountPoints.includes(directory) };
+  if (info.exists) {
+    const stat = fs.statSync(directory);
+    Object.assign(info, { isDirectory: stat.isDirectory(), ownerUid: stat.uid, mode: (stat.mode & 0o777).toString(8) });
+    if (stat.isDirectory()) {
+      info.fileCount = fs.readdirSync(directory, { withFileTypes: true }).filter(item => item.isFile()).length;
+      const temporary = path.join(directory, '.storage-probe-' + crypto.randomUUID());
+      let created = false;
+      try {
+        fs.writeFileSync(temporary, 'storage-probe', { flag: 'wx', mode: 0o600 });
+        created = true;
+        info.writeReadOk = fs.readFileSync(temporary, 'utf8') === 'storage-probe';
+      } catch (error) {
+        info.writeReadOk = false;
+        info.error = error.code || error.name;
+      } finally {
+        if (created) {
+          try { fs.unlinkSync(temporary); info.probeRemoved = true; }
+          catch (error) { info.probeRemoved = false; info.removeError = error.code || error.name; }
+        }
+      }
+    }
+  }
+  report.directories.push(info);
+}
+report.referencedPricePdfPresent = fs.existsSync(path.resolve('media', 'Прайс 10coffee Июль-1.pdf'));
+console.log(JSON.stringify(report, null, 2));
+NODE

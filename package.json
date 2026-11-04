@@ -15,7 +15,8 @@
     "payload:generate-types": "node scripts/payload-generate-types.mjs",
     "loyalty:e2e": "node --require ./scripts/os-userinfo-workaround.cjs --import tsx scripts/test-loyalty-flow.ts",
     "test:security": "node --test scripts/test-security.cjs",
-    "test:email": "node --test scripts/test-auth-email.cjs scripts/test-smtp-config.cjs",
+    "test:email": "node --test scripts/test-auth-email.cjs scripts/test-smtp-config.cjs scripts/test-price-list-email.cjs",
+    "test:storage": "node --test scripts/test-avatar-storage.cjs",
     "test:moysklad": "node --test scripts/test-moysklad-reliability.cjs scripts/test-moysklad-status-scheduler.mjs",
     "test:checkout": "node --test scripts/test-shop-checkout.cjs"
   },

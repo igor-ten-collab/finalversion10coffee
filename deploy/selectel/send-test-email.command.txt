@@ -1,0 +1,37 @@
+# Replace the recipient in the next line with your own Gmail address.
+# Sends exactly ONE plain-text diagnostic email via the application's SMTP helper.
+# No database writes, password resets or attachments. Do not repeat automatically.
+SMTP_TEST_TO='YOUR_ADDRESS@gmail.com' node --experimental-strip-types --input-type=module <<'NODE'
+import { createSmtpTransport } from './lib/email/smtp.ts';
+import crypto from 'node:crypto';
+const e = process.env;
+const to = (e.SMTP_TEST_TO || '').trim();
+if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(to) || to.includes('YOUR_ADDRESS')) throw Error('Replace YOUR_ADDRESS@gmail.com with your own email first');
+if (!/^[^\s@,;<>]+@10coffee\.ru$/i.test((e.SMTP_EMAIL || '').trim())) throw Error('SMTP_EMAIL must be a sender address on the verified 10coffee.ru domain');
+if (e.SMTP_HOST?.trim() !== 'smtp.mail.selcloud.ru') throw Error('Expected the configured Selectel SMTP host');
+const code = crypto.randomUUID();
+const transport = createSmtpTransport();
+const timer = setTimeout(() => {
+  console.log(JSON.stringify({ testCode: code, status: 'TIMEOUT_DELIVERY_UNKNOWN', retryAutomatically: false }));
+  process.exit(1);
+}, 25000);
+try {
+  const result = await transport.sendMail({
+    from: `"10coffee" <${e.SMTP_EMAIL.trim()}>`,
+    to,
+    subject: '10coffee: проверка доставки ' + code.slice(0, 8),
+    text: 'Это одно тестовое письмо для проверки доставки с сайта 10coffee.ru.\n\nКод проверки: ' + code + '\n\nПроверка не меняет пароли и заказы.',
+  });
+  console.log(JSON.stringify({ testCode: code, status: 'SMTP_ACCEPTED', messageId: result.messageId,
+    acceptedCount: result.accepted?.length || 0, rejectedCount: result.rejected?.length || 0,
+    response: result.response }, null, 2));
+} catch (error) {
+  console.log(JSON.stringify({ testCode: code, status: 'SMTP_FAILED', code: error.code || error.name,
+    responseCode: error.responseCode, command: error.command,
+    response: String(error.response || '').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[email]') }, null, 2));
+  process.exitCode = 1;
+} finally {
+  clearTimeout(timer);
+  transport.close();
+}
+NODE

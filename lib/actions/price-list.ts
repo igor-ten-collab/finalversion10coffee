@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import type { SendMailOptions } from "nodemailer";
-import { createSmtpTransport } from "@/lib/email/smtp";
+import { createSmtpTransport, sendSmtpMail } from "@/lib/email/smtp";
 import { getPayload } from "payload";
 import configPromise from "@payload-config";
 
@@ -18,6 +18,7 @@ export type PriceListState = {
   success: boolean;
   error?: string;
   name?: string;
+  emailSent?: boolean;
 };
 
 const smtpTransporter = createSmtpTransport();
@@ -67,12 +68,27 @@ export async function submitPriceListRequest(
 
     // The uploaded file is the single source for the public price-list link and email attachment.
     const emailFile = settings?.priceListForm?.emailFile;
-    if (emailFile?.url) {
+    if (!emailFile?.url) {
+      console.error("[price-list]", JSON.stringify({ requestId: record.id, code: "PRICE_LIST_NOT_CONFIGURED" }));
+      return { success: true, name, emailSent: false };
+    }
+    try {
+      // Download the configured PDF before opening SMTP. Missing files from
+      // an incomplete media restore must not produce a false email success.
+      const response = await fetch(new URL(emailFile.url, siteUrl), { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) {
+        console.error("[price-list]", JSON.stringify({ requestId: record.id, code: "PRICE_LIST_HTTP_ERROR", httpStatus: response.status }));
+        return { success: true, name, emailSent: false };
+      }
       attachments.push({
         filename: emailFile.filename || "Прайс-лист 10кофе.pdf",
-        path: new URL(emailFile.url, siteUrl).toString(),
+        content: Buffer.from(await response.arrayBuffer()),
         contentType: "application/pdf",
       });
+    } catch (error) {
+      const failure = error as { code?: string; name?: string };
+      console.error("[price-list]", JSON.stringify({ requestId: record.id, code: failure?.code || failure?.name || "PRICE_LIST_DOWNLOAD_FAILED" }));
+      return { success: true, name, emailSent: false };
     }
 
     // Sender info from settings
@@ -83,7 +99,7 @@ export async function submitPriceListRequest(
     // 3. Send email to client
     let emailSent = false;
     try {
-      await smtpTransporter.sendMail({
+      await sendSmtpMail(smtpTransporter, "price-list", {
         from: `"10кофе" <${process.env.SMTP_EMAIL}>`,
         to: email,
         subject: "Прайс-лист и условия сотрудничества | 10кофе",
@@ -123,7 +139,7 @@ export async function submitPriceListRequest(
       });
       emailSent = true;
     } catch {
-      // Email failed — request is already saved in admin
+      // The shared SMTP helper records the failure; the request stays saved.
     }
 
     // 4. Update emailSent status
@@ -135,7 +151,7 @@ export async function submitPriceListRequest(
       });
     }
 
-    return { success: true, name };
+    return { success: true, name, emailSent };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : err;
     console.error("[price-list] Error:", message);

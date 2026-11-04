@@ -98,11 +98,13 @@ export default function SettingsPage() {
       form.append("file", resized, "avatar.jpg")
 
       const res = await fetch("/api/upload-avatar", { method: "POST", body: form })
-      const json = await res.json()
+      const json = await res.json().catch(() => null)
 
-      if (!res.ok) throw new Error(json.error || "Ошибка загрузки")
+      if (!res.ok) throw new Error(json?.error || `Ошибка загрузки аватара (${res.status})`)
+      if (!json?.url) throw new Error("Сервер не вернул ссылку на аватар")
 
-      await supabase.auth.updateUser({ data: { avatar_url: json.url } })
+      const { error: profileError } = await supabase.auth.updateUser({ data: { avatar_url: json.url } })
+      if (profileError) throw new Error("Не удалось сохранить аватар в профиле")
       setAvatarUrl(json.url)
       toast.success("Аватар обновлён")
     } catch (err: unknown) {

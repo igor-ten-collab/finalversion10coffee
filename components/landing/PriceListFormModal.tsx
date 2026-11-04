@@ -42,11 +42,18 @@ export default function PriceListFormModal({ isOpen, onClose }: Props) {
           <div className={styles.success}>
             <div className={styles.successIcon}>✓</div>
             <h4 className={styles.successTitle}>
-              {state.name ? `${state.name}, письмо отправлено!` : "Письмо отправлено!"}
+              {state.emailSent
+                ? (state.name ? `${state.name}, письмо отправлено!` : "Письмо отправлено!")
+                : (state.name ? `${state.name}, заявка получена!` : "Заявка получена!")}
             </h4>
             <p className={styles.successText}>
-              Прайс-лист 10кофе уже летит к вам на почту.<br />
-              Если письмо не пришло — проверьте папку «Спам».
+              {state.emailSent ? <>
+                Письмо с прайс-листом отправлено на указанный email.<br />
+                Если письмо не пришло — проверьте папку «Спам».
+              </> : <>
+                Заявка сохранена, но отправить прайс-лист не удалось.<br />
+                Свяжитесь с нами, чтобы получить файл.
+              </>}
             </p>
             <button className={styles.btn} onClick={onClose}>Закрыть</button>
           </div>

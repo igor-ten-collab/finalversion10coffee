@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer"
+import nodemailer, { type SendMailOptions } from "nodemailer"
 
 export function getSmtpOptions(env: Record<string, string | undefined> = process.env) {
   const host = env.SMTP_HOST?.trim()
@@ -38,4 +38,34 @@ export function getSmtpOptions(env: Record<string, string | undefined> = process
 
 export function createSmtpTransport() {
   return nodemailer.createTransport(getSmtpOptions())
+}
+
+// Record relay acceptance separately from delivery. Never log credentials,
+// recipients or message bodies (password emails contain a generated password).
+export async function sendSmtpMail(
+  transporter: ReturnType<typeof createSmtpTransport>,
+  operation: "registration" | "password-reset" | "price-list",
+  message: SendMailOptions,
+) {
+  try {
+    const info = await transporter.sendMail(message)
+    console.info("[SMTP]", JSON.stringify({
+      operation,
+      status: "accepted",
+      messageId: info.messageId || null,
+      acceptedCount: info.accepted?.length || 0,
+      rejectedCount: info.rejected?.length || 0,
+    }))
+    return info
+  } catch (error) {
+    const failure = error as { code?: string; responseCode?: number; command?: string }
+    console.error("[SMTP]", JSON.stringify({
+      operation,
+      status: "failed",
+      code: failure?.code || "SMTP_SEND_FAILED",
+      responseCode: failure?.responseCode,
+      command: failure?.command,
+    }))
+    throw error
+  }
 }
