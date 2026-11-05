@@ -1,0 +1,38 @@
+# Coolify -> 10coffee -> Terminal. Recovers ONLY the verified payment/order 00544.
+# GET verifies the real paid amount, currency and metadata before application logic.
+# Applies the normal paid-order workflow: DB status, MoySklad, cart/loyalty, confirmation mail.
+# Does not create, capture, cancel or refund a YooKassa payment. No new charge.
+node --require ./scripts/os-userinfo-workaround.cjs --import tsx --input-type=module <<'NODE'
+const getExport=(m,key)=>m[key]||m.default?.[key];
+const runtimeModule=await import('./scripts/payload-runtime.ts');
+getExport(runtimeModule,'preparePayloadRuntime')();
+const need=(value,message)=>{if(!value)throw Error(message)};
+try {
+  const [{getPayload},configModule,paymentModule,statusModule]=await Promise.all([
+    import('payload'),import('./payload.config.ts'),import('./lib/payments/yookassa.ts'),
+    import('./lib/payments/yookassa-order-status.ts')]);
+  const payload=await getPayload({config:configModule.default?.default||configModule.default});
+  const order=await payload.findByID({collection:'orders',id:404,depth:0,overrideAccess:true});
+  const paymentId='327e46de-000f-5001-a000-1e66f2c7694b';
+  need(order.orderId==='10C-00544'&&order.paymentExternalId===paymentId&&Number(order.total)===2645
+    &&order.salesChannel==='retail'&&order.paymentMethod==='yookassa','Order changed; stopped without updating it');
+  const config=await getExport(paymentModule,'getYooKassaConfig')();
+  need(config.enabled&&config.shopId&&config.secretKey,'YooKassa is not configured');
+  const response=await fetch('https://api.yookassa.ru/v3/payments/'+paymentId,
+    {headers:{Authorization:'Basic '+Buffer.from(config.shopId+':'+config.secretKey).toString('base64')},
+      signal:AbortSignal.timeout(20000),redirect:'error'});
+  need(response.ok,'YooKassa HTTP '+response.status);
+  const payment=await response.json();
+  need(payment.id===paymentId&&payment.status==='succeeded'&&payment.paid===true&&payment.test===false
+    &&payment.amount?.currency==='RUB'&&Number(payment.amount.value)===2645
+    &&payment.metadata?.order_id==='404'&&payment.metadata?.order_number==='10C-00544'
+    &&payment.recipient?.account_id===config.shopId,'Payment does not match the verified real paid order');
+  const result=await getExport(statusModule,'refreshYooKassaOrderPayment')(paymentId,'payment');
+  const after=await payload.findByID({collection:'orders',id:404,depth:0,overrideAccess:true});
+  console.log(JSON.stringify({result,site:{id:after.id,orderId:after.orderId,status:after.status,
+    paymentStatus:after.paymentStatus,total:after.total,moyskladSyncStatus:after.moyskladSyncStatus,
+    moyskladCustomerOrderId:after.moyskladCustomerOrderId,moyskladSyncError:after.moyskladSyncError}},null,2));
+  if(!result.ok||after.paymentStatus!=='paid'||!after.moyskladCustomerOrderId)process.exitCode=1;
+} catch(error) {console.error(JSON.stringify({ok:false,error:error.code||error.message}));process.exitCode=1}
+process.exit(process.exitCode||0);
+NODE

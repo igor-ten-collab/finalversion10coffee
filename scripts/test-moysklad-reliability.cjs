@@ -76,6 +76,7 @@ function fixture({ respond, config: overrides = {}, signalAPI = AbortSignal, onD
       if (['crypto', 'node:crypto'].includes(target)) return require('node:crypto')
       if (target === 'node:util') return require('node:util')
       if (target === 'lib/moysklad/order-identity') return load(target)
+      if (target === 'lib/payments/yookassa') return load(target)
       if (['lib/moysklad/status-sync', 'payload/collections/Orders', 'lib/moysklad/client', 'lib/moysklad/sync', 'lib/moysklad/bundles', 'lib/moysklad/order-totals', 'lib/moysklad/order-eligibility', 'lib/moysklad/order-link-repair', 'lib/moysklad/order-hash', 'lib/moysklad/order-link-service', 'lib/moysklad/order-link-endpoint', 'lib/moysklad/order-retry', 'lib/moysklad/import-catalog', 'lib/moysklad/products', 'lib/slug', 'lib/discounts', 'lib/product-types', 'payload/access/adminRoles', 'lib/actions/products', 'lib/actions/shop-orders', 'lib/utils/phone', 'lib/payments/yookassa-receipt', 'lib/payments/yookassa-order-status', 'app/api/shop/payments/yookassa/webhook/route'].includes(target)) return load(target)
       throw new Error(`Unexpected dependency: ${id}`)
     }
@@ -867,8 +868,19 @@ function retailFixture({ account = false, promo, discountPercent = 0, loyaltyFai
       price: 500, weightGrams: 100, isAvailable: true, grindOptions: [] }] }]
   const client = { id: 9, supabaseId: 'customer', fullName: 'Test Customer', email: 'customer@example.invalid',
     moyskladCounterpartyId: 'retail-buyer', discountPercent }
-  const state = { order: null, httpFailure, loyaltyFailure, paymentCalls: [], remote: null, loyaltyCalls: 0, providerPayment: {} }
-  const f = fixture({ config: { createCounterparties: true, deliveryServiceId: 'delivery', syncOrdersOnCreate: exportEnabled }, respond: call => {
+  const state = { order: null, httpFailure, loyaltyFailure, paymentCalls: [], remote: null, loyaltyCalls: 0, providerPayment: {}, paymentReads: 0, onPaymentRead: null, locks: [], heldLocks: new Set() }
+  const dbConnection = { query: async (sql,params) => {
+    const key=params?.[0]
+    state.locks.push([sql,key])
+    if(sql.includes('pg_try_advisory_lock')){
+      const locked=!state.heldLocks.has(key)
+      if(locked)state.heldLocks.add(key)
+      return {rows:[{locked}]}
+    }
+    if(sql.includes('pg_advisory_unlock')){state.heldLocks.delete(key);return {rows:[]}}
+    throw Error('Unexpected payment SQL: '+sql)
+  },release:()=>{} }
+  const f = fixture({ dbConnection, config: { createCounterparties: true, deliveryServiceId: 'delivery', syncOrdersOnCreate: exportEnabled }, respond: call => {
     if (state.httpFailure) return unavailable()
     if (call.path.startsWith('entity/product/retail-coffee')) return Response.json({ id: 'retail-coffee', uom: { name: 'кг' } })
     if (call.path === 'entity/counterparty/retail-buyer') return Response.json({ id: 'retail-buyer' })
@@ -899,8 +911,12 @@ function retailFixture({ account = false, promo, discountPercent = 0, loyaltyFai
         state.paymentCalls.push(input)
         return { ok: true, paymentId: 'test-payment', paymentUrl: 'https://payments.invalid/test' }
       },
-      getYooKassaPayment: async () => ({ ok: true, paymentId: 'test-payment', orderId: '448',
-        amountRubles: state.order.total, status: 'paid', ...state.providerPayment }),
+      getYooKassaPayment: async () => {
+        state.paymentReads++
+        if(state.onPaymentRead)await state.onPaymentRead()
+        return {ok:true,paymentId:'test-payment',orderId:'448',orderNumber:state.order.orderId,
+          currency:'RUB',amountRubles:state.order.total,status:'paid',...state.providerPayment}
+      },
     },
     'lib/cdek': { calculateTariff: async () => [{ delivery_mode: 2, delivery_sum: 341 }] },
     'lib/delivery-packaging': { getDeliveryPackagingSettings: async () => ({}),
@@ -1558,4 +1574,141 @@ test('a verified paid callback honours Runtime export disable while retaining th
   assert.equal(f.state.order.paymentStatus,'paid')
   assert.equal(f.state.remote,null)
   assert.equal(f.calls.length,0)
+})
+
+for (const [label,provider] of [
+  ['different currency',{currency:'USD'}],['missing order metadata',{orderId:undefined}],
+  ['different order number',{orderNumber:'OTHER'}],
+]) test(`payment reconciliation refuses ${label} without changing the order`,async()=>{
+  const f=retailFixture();await f.checkout();Object.assign(f.state.providerPayment,provider)
+  const before=clone(f.state.order)
+  assert.equal((await f.payment()).ok,false)
+  assert.deepEqual(clone(f.state.order),before)
+  assert.equal(f.calls.length,0)
+  assert.equal(f.state.heldLocks.size,0)
+})
+
+test('concurrent webhook and polling use one payment lock and cannot create two MS orders',async()=>{
+  const f=retailFixture();await f.checkout()
+  let continueRead,started
+  const reading=new Promise(resolve=>{started=resolve})
+  f.state.onPaymentRead=()=>{started();return new Promise(resolve=>{continueRead=resolve})}
+  const first=f.payment();await reading
+  const busy=await f.webhook()
+  assert.equal(busy.status,503)
+  assert.equal(f.state.paymentReads,1)
+  continueRead();assert.equal((await first).ok,true)
+  assert.equal(writes(f,'customerorder').length,1)
+  assert.equal(f.state.heldLocks.size,0)
+})
+
+test('a stale pending result cannot overwrite an already verified paid order',async()=>{
+  const f=retailFixture();await f.checkout();assert.equal((await f.payment()).ok,true)
+  const before=clone(f.state.order)
+  f.state.providerPayment.status='pending'
+  assert.equal((await f.payment()).ok,false)
+  assert.deepEqual(clone(f.state.order),before)
+  assert.equal(f.state.heldLocks.size,0)
+})
+
+function enableRealPaymentQueue(f) {
+  const find=f.payload.find
+  f.payload.find=async input=>input.collection==='orders'&&input.where?.and
+    ? {docs:[f.state.order].filter(x=>matchesWhere(x,input.where)).map(clone),hasNextPage:false}
+    : find(input)
+  return ()=>f.load('lib/payments/yookassa-order-status').reconcilePendingYooKassaPayments()
+}
+
+test('a missed webhook is recovered by reconciliation only after the provider confirms payment',async()=>{
+  const f=retailFixture();await f.checkout();const reconcile=enableRealPaymentQueue(f)
+  f.state.providerPayment.status='pending'
+  assert.equal((await reconcile()).updated,0)
+  assert.equal(f.state.order.paymentStatus,'pending')
+  assert.equal(writes(f,'customerorder').length,0)
+  f.state.providerPayment.status='paid'
+  const result=await reconcile()
+  assert.equal(result.checked,1)
+  assert.equal(result.updated,1)
+  assert.equal(result.errors.length,0)
+  assert.equal(f.state.order.paymentStatus,'paid')
+  assert.equal(f.state.order.moyskladSyncStatus,'synced')
+  assert.equal(writes(f,'customerorder').length,1)
+  assert.equal((await reconcile()).checked,0)
+  assert.equal(f.state.heldLocks.size,0)
+})
+
+test('reconciliation retries an unlinked paid export after a transient MS failure',async()=>{
+  const f=retailFixture({httpFailure:true});await f.checkout();const reconcile=enableRealPaymentQueue(f)
+  const failed=await reconcile()
+  assert.equal(f.state.order.paymentStatus,'paid')
+  assert.equal(f.state.order.moyskladSyncStatus,'error')
+  assert.equal(failed.errors.length,1)
+  f.state.httpFailure=false
+  assert.equal((await reconcile()).errors.length,0)
+  assert.equal(f.state.order.moyskladSyncStatus,'synced')
+  assert.equal(writes(f,'customerorder').length,1)
+})
+
+test('a second reconciliation yields to the global lock without reading or updating orders',async()=>{
+  const f=retailFixture();await f.checkout();const reconcile=enableRealPaymentQueue(f)
+  f.state.heldLocks.add('yookassa-payment-reconciliation')
+  const reads=f.state.paymentReads,updates=f.updates.length
+  assert.equal((await reconcile()).skipped,true)
+  assert.equal(f.state.paymentReads,reads)
+  assert.equal(f.updates.length,updates)
+})
+
+test('pending payment recovery still saves the payment when MS export is paused',async()=>{
+  const f=retailFixture({exportEnabled:false});await f.checkout();const reconcile=enableRealPaymentQueue(f)
+  assert.equal((await reconcile()).updated,1)
+  assert.equal(f.state.order.paymentStatus,'paid')
+  assert.equal(writes(f,'customerorder').length,0)
+  assert.equal((await reconcile()).checked,0,'paused MS retries must not repeatedly touch paid orders')
+})
+
+test('full queue is collected before status changes, and one failing payment does not stop other pages',async()=>{
+  const orders=Array.from({length:205},(_,i)=>({id:i+1,orderId:'TEST-'+(i+1),paymentExternalId:'payment-'+(i+1),
+    paymentMethod:'yookassa',paymentStatus:'pending',salesChannel:'retail',total:100}))
+  const events=[],held=new Set()
+  const f=fixture({config:{syncOrdersOnCreate:false},dbConnection:{query:async(sql,params)=>{
+    if(sql.includes('pg_try_advisory_lock')){const locked=!held.has(params[0]);if(locked)held.add(params[0]);return{rows:[{locked}]}}
+    held.delete(params[0]);return{rows:[]}
+  },release:()=>{}},extraMocks:{payload:{getPayload:async()=>f.payload},'@payload-config':{},
+    'lib/payments/yookassa':{getYooKassaPayment:async id=>{
+      if(id==='payment-1')throw Error('transient provider failure')
+      const n=Number(id.split('-')[1]);return{ok:true,paymentId:id,orderId:String(n),orderNumber:'TEST-'+n,currency:'RUB',amountRubles:100,status:'cancelled'}
+    }},'lib/loyalty':{releaseLoyaltyReservation:async()=>{}},'lib/payments/paid-order-cart':{},'lib/payments/paid-order-email':{},'lib/yandex-delivery':{}}})
+  f.payload.find=async input=>{
+    if(input.where.and){events.push('page-'+input.page);const pending=orders.filter(x=>matchesWhere(x,input.where));return{
+      docs:pending.slice((input.page-1)*input.limit,input.page*input.limit).map(clone),
+      hasNextPage:input.page*input.limit<pending.length,nextPage:input.page+1}}
+    return{docs:orders.filter(x=>matchesWhere(x,input.where)).map(clone)}
+  }
+  f.payload.findByID=async({id})=>clone(orders.find(x=>x.id===id))
+  f.payload.update=async input=>{events.push('update');Object.assign(orders.find(x=>x.id===input.id),clone(input.data));return{}}
+  const result=await f.load('lib/payments/yookassa-order-status').reconcilePendingYooKassaPayments()
+  assert.equal(result.checked,205)
+  assert.equal(result.updated,204)
+  assert.equal(result.errors.length,1)
+  assert.deepEqual(events.slice(0,2),['page-1','page-2'])
+  assert.equal(orders[204].paymentStatus,'cancelled')
+  assert.equal(orders[0].paymentStatus,'pending')
+  assert.equal(held.size,0)
+})
+
+test('YooKassa GET uses a deadline and rejects unknown/malformed provider responses',async()=>{
+  for(const data of [
+    {id:'test-payment',status:'succeeded',amount:{value:'10.00',currency:'RUB'},metadata:{order_id:'404',order_number:'10C-00544'}},
+    {id:'test-payment',status:'unknown-provider-state'}, {status:'succeeded'},
+  ]){
+    const f=fixture({respond:c=>{
+      if(c.path.startsWith('https://api.yookassa.ru/v3/payments/')){
+        assert.ok(c.init.signal instanceof AbortSignal)
+        return Response.json(data)
+      }
+    },extraMocks:{payload:{getPayload:async()=>({findGlobal:async()=>({enabled:true,shopId:'test-shop',secretKey:'not-a-real-secret'})})},'@payload-config':{}}})
+    const result=await f.load('lib/payments/yookassa').getYooKassaPayment('test-payment')
+    assert.equal(result.ok,data.status==='succeeded'&&Boolean(data.id))
+    if(result.ok)assert.equal(result.currency,'RUB')
+  }
 })

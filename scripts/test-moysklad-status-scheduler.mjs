@@ -114,6 +114,10 @@ function startupFixture() {
     startScheduler: ({ env }) => {
       events.push(['scheduler', env.MOYSKLAD_ENABLED])
       return () => { events.push(['stop']) }
+    },
+    startPaymentScheduler: () => {
+      events.push(['payment-scheduler'])
+      return () => { events.push(['stop-payments']) }
     }, logger: { error: (...args) => events.push(['error', ...args]) },
   })
   return { start, appProcess, server, events }
@@ -128,9 +132,10 @@ test('npm start loads the production environment and starts both Next and status
     ['env', '/app', 'production'],
     ['server', 'node', ['node_modules/next/dist/bin/next', 'start', '-p', '3099'], 'true'],
     ['scheduler', 'true'],
+    ['payment-scheduler'],
   ])
   f.appProcess.emit('SIGTERM')
-  assert.deepEqual(f.events.slice(-2), [['stop'], ['kill', 'SIGTERM']])
+  assert.deepEqual(f.events.slice(-3), [['stop'], ['stop-payments'], ['kill', 'SIGTERM']])
   f.server.emit('exit', 0, null)
   assert.equal(f.appProcess.exitCode, 0)
   assert.equal(f.appProcess.listenerCount('SIGTERM'), 0)

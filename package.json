@@ -18,6 +18,7 @@
     "test:email": "node --test scripts/test-auth-email.cjs scripts/test-smtp-config.cjs scripts/test-price-list-email.cjs",
     "test:storage": "node --test scripts/test-avatar-storage.cjs",
     "test:moysklad": "node --test scripts/test-moysklad-reliability.cjs scripts/test-moysklad-status-scheduler.mjs",
+    "test:payments": "node --test scripts/test-moysklad-reliability.cjs scripts/test-yookassa-payment-scheduler.mjs",
     "test:checkout": "node --test scripts/test-shop-checkout.cjs"
   },
   "dependencies": {

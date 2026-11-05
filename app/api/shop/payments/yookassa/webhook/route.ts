@@ -26,5 +26,5 @@ export async function POST(request: NextRequest) {
     // and email delivery is idempotent, so a retry is safe.
     return NextResponse.json({ ok: false, error: "Не отправлено подтверждение оплаты" }, { status: 502 })
   }
-  return NextResponse.json(result, { status: result.ok ? 200 : 400 })
+  return NextResponse.json(result, { status: result.ok ? 200 : "retryable" in result && result.retryable ? 503 : 400 })
 }

@@ -48,6 +48,7 @@ async function yooKassaRequest<T>(path: string, config: YooKassaConfig, init?: R
       ...init?.headers,
     },
     cache: "no-store",
+    ...((!init?.method || init.method === "GET") ? { signal: init?.signal || AbortSignal.timeout(20000) } : {}),
   })
   const result = await response.json().catch(() => null) as (T & { description?: string }) | null
   if (!response.ok || !result) throw new Error(result?.description || `YooKassa вернула HTTP ${response.status}`)
@@ -111,12 +112,16 @@ export async function getYooKassaPayment(paymentId: string) {
   try {
     const payment = await yooKassaRequest<YooKassaPayment>(`/payments/${encodeURIComponent(paymentId)}`, config)
     const statusMap: Record<string, YooKassaPaymentStatus> = { pending: "pending", waiting_for_capture: "pending", succeeded: "paid", canceled: "cancelled" }
+    if (!payment.id || !payment.status || !statusMap[payment.status]) {
+      return { ok: false as const, error: "YooKassa вернула неизвестный статус или некорректный ID платежа" }
+    }
     return {
       ok: true as const,
       paymentId: payment.id || paymentId,
       paymentUrl: payment.confirmation?.confirmation_url,
       status: statusMap[payment.status || ""] || "failed",
       amountRubles: Number(payment.amount?.value),
+      currency: payment.amount?.currency,
       orderId: payment.metadata?.order_id,
       orderNumber: payment.metadata?.order_number,
     }

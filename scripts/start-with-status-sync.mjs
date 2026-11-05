@@ -2,12 +2,14 @@ import { spawn } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import nextEnv from '@next/env'
 import { startMoyskladStatusScheduler } from './moysklad-status-scheduler.mjs'
+import { startYooKassaPaymentScheduler } from './yookassa-payment-scheduler.mjs'
 
 export function startApplication({
   appProcess = process,
   spawnImpl = spawn,
   loadEnvironment = nextEnv.loadEnvConfig,
   startScheduler = startMoyskladStatusScheduler,
+  startPaymentScheduler = startYooKassaPaymentScheduler,
   logger = console,
 } = {}) {
   appProcess.env.NODE_ENV ||= 'production'
@@ -19,14 +21,17 @@ export function startApplication({
     env: appProcess.env,
   })
   const stopScheduler = startScheduler({ env: appProcess.env })
+  const stopPaymentScheduler = startPaymentScheduler({ env: appProcess.env })
   const signalHandlers = new Map()
   const cleanup = () => {
     stopScheduler()
+    stopPaymentScheduler()
     for (const [signal, handler] of signalHandlers) appProcess.off(signal, handler)
   }
   for (const signal of ['SIGTERM', 'SIGINT']) {
     const handler = () => {
       stopScheduler()
+      stopPaymentScheduler()
       server.kill(signal)
     }
     signalHandlers.set(signal, handler)

@@ -1,0 +1,41 @@
+# Coolify -> 10coffee -> Terminal. Reads DB and YooKassa; no changes or charges.
+# Does not print secret keys, card data, customer contacts or payment URLs.
+node <<'NODE'
+const pg=require('pg'),e=process.env;
+const db=new pg.Client({connectionString:e.DATABASE_URL,ssl:false,connectionTimeoutMillis:10000});
+const safeUrl=value=>{try{const u=new URL(value);return u.origin+u.pathname}catch{return null}};
+(async()=>{
+  await db.connect();await db.query('BEGIN READ ONLY');await db.query("SET LOCAL statement_timeout='10s'");
+  const rows=(await db.query(`SELECT id,order_id,status,payment_status,payment_external_id,payment_updated_at,total,
+    moysklad_sync_status,moysklad_customer_order_id,moysklad_sync_error,created_at,updated_at
+    FROM public.orders WHERE order_id=$1`,['10C-00544'])).rows;
+  if(rows.length!==1)throw Error('Expected exactly one site order 10C-00544');
+  const site=rows[0];
+  const settingsRows=(await db.query('SELECT to_jsonb(s) AS row FROM public.payment_settings s LIMIT 2')).rows;
+  if(settingsRows.length>1)throw Error('Ambiguous payment settings');
+  const settings=settingsRows[0]?.row||{};
+  await db.query('ROLLBACK');
+  const shop=String(settings.shop_id||e.YOOKASSA_SHOP_ID||'').trim();
+  const secret=String(settings.secret_key||e.YOOKASSA_SECRET_KEY||'').trim();
+  const report={commit:e.SOURCE_COMMIT,config:{enabled:settings.enabled??e.YOOKASSA_ENABLED==='true',
+    shopConfigured:Boolean(shop),keyConfigured:Boolean(secret),
+    returnUrl:safeUrl(settings.return_url||e.YOOKASSA_RETURN_URL||'https://shop.10coffee.ru/order/success'),
+    configuredWebhookUrl:safeUrl(settings.webhook_url||e.YOOKASSA_WEBHOOK_URL||'https://shop.10coffee.ru/api/shop/payments/yookassa/webhook'),
+    moyskladEnabled:e.MOYSKLAD_ENABLED,moyskladExportEnabled:e.MOYSKLAD_SYNC_ORDERS_ON_CREATE},site};
+  if(!site.payment_external_id||!shop||!secret){console.log(JSON.stringify({...report,error:'Missing payment ID or effective credentials'},null,2));return;}
+  const r=await fetch('https://api.yookassa.ru/v3/payments/'+encodeURIComponent(site.payment_external_id),
+    {headers:{Authorization:'Basic '+Buffer.from(shop+':'+secret).toString('base64')},signal:AbortSignal.timeout(20000),redirect:'error'});
+  const p=await r.json();
+  report.yookassa={http:r.status,id:p.id,status:p.status,paid:p.paid,test:p.test,
+    amount:p.amount?.value,currency:p.amount?.currency,capturedAt:p.captured_at,
+    orderId:p.metadata?.order_id,orderNumber:p.metadata?.order_number,
+    recipientMatchesShop:p.recipient?.account_id===shop,errorCode:r.ok?undefined:p.code};
+  report.checks={idMatches:p.id===site.payment_external_id,
+    orderIdMatches:String(p.metadata?.order_id||'')===String(site.id),
+    orderNumberMatches:p.metadata?.order_number===site.order_id,
+    amountMatches:Number(p.amount?.value)===Number(site.total),currencyRub:p.amount?.currency==='RUB',
+    succeeded:p.status==='succeeded'&&p.paid===true};
+  console.log(JSON.stringify(report,null,2));
+})().catch(error=>{console.error(JSON.stringify({error:error.code||error.message}));process.exitCode=1})
+  .finally(async()=>{await db.end().catch(()=>{})});
+NODE
