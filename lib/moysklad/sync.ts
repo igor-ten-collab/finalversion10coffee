@@ -1021,7 +1021,9 @@ export async function syncOrderToMoysklad(params: SyncOrderParams) {
   }
   const salesChannel: SalesChannel = params.order.salesChannel || (params.order.customerType === "individual" ? "retail" : "wholesale")
   const config = getMoyskladConfig(salesChannel)
-  if (!config.enabled || (!config.syncOrdersOnCreate && !params.force)) {
+  // The Runtime switch is a kill switch, including payment webhooks and
+  // forced maintenance. A retry may refresh unchanged content, not bypass it.
+  if (!config.enabled || !config.syncOrdersOnCreate) {
     return { skipped: true as const }
   }
 

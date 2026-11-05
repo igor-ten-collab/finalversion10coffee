@@ -857,7 +857,7 @@ test('partially filled and deliberately cleared packaging stays as the administr
   assert.deepEqual(packageValues(f.product().variants[0]), [null, null, null, 275])
 })
 
-function retailFixture({ account = false, promo, discountPercent = 0, loyaltyFailure = false, httpFailure = false } = {}) {
+function retailFixture({ account = false, promo, discountPercent = 0, loyaltyFailure = false, httpFailure = false, exportEnabled = true } = {}) {
   const products = [{ id: 10, name: 'Coffee', slug: 'coffee', moyskladId: 'retail-coffee',
     detailsSchema: 'coffee', isVisible: true, category: 1,
     variants: [{ id: 'pack-coffee', name: '250 г', moyskladId: 'coffee-250', moyskladType: 'variant',
@@ -868,7 +868,7 @@ function retailFixture({ account = false, promo, discountPercent = 0, loyaltyFai
   const client = { id: 9, supabaseId: 'customer', fullName: 'Test Customer', email: 'customer@example.invalid',
     moyskladCounterpartyId: 'retail-buyer', discountPercent }
   const state = { order: null, httpFailure, loyaltyFailure, paymentCalls: [], remote: null, loyaltyCalls: 0, providerPayment: {} }
-  const f = fixture({ config: { createCounterparties: true, deliveryServiceId: 'delivery' }, respond: call => {
+  const f = fixture({ config: { createCounterparties: true, deliveryServiceId: 'delivery', syncOrdersOnCreate: exportEnabled }, respond: call => {
     if (state.httpFailure) return unavailable()
     if (call.path.startsWith('entity/product/retail-coffee')) return Response.json({ id: 'retail-coffee', uom: { name: 'кг' } })
     if (call.path === 'entity/counterparty/retail-buyer') return Response.json({ id: 'retail-buyer' })
@@ -1539,4 +1539,23 @@ test('a restored ID collision cannot be marked unchanged using the old content h
   const result = await f.run()
   assert.equal(result.succeeded, 1, JSON.stringify(result.retried))
   assert.equal(writes(f, 'customerorder').length, 1)
+})
+
+test('Runtime export disable cannot be bypassed by a forced direct export', async () => {
+  const f = fixture({config:{syncOrdersOnCreate:false}})
+  f.params.force = true
+  assert.equal((await f.sync.syncOrderToMoysklad(f.params)).skipped,true)
+  assert.equal(f.calls.length,0)
+  assert.equal(f.updates.length,0)
+})
+
+test('a verified paid callback honours Runtime export disable while retaining the real payment', async () => {
+  const f=retailFixture({exportEnabled:false})
+  assert.equal((await f.checkout()).success,true)
+  const result=await f.payment()
+  assert.equal(result.ok,true)
+  assert.equal(result.moyskladSynced,null)
+  assert.equal(f.state.order.paymentStatus,'paid')
+  assert.equal(f.state.remote,null)
+  assert.equal(f.calls.length,0)
 })
