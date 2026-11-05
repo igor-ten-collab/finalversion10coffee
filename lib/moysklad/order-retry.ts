@@ -5,6 +5,7 @@ import { calculateClientDiscount, normalizeCategoryDiscounts, normalizeDiscountP
 import { syncOrderToMoysklad, MoyskladTrashedOrderError } from "./sync"
 import { computeOrderContentHash } from "./order-hash"
 import { canExportOrderToMoysklad, moyskladExportEligibilityWhere } from "./order-eligibility"
+import { assertRemoteOrderIdentity, assertRemoteOrderTotalsConsistent } from "./order-identity"
 import type { MoyskladDiscountLine } from "./order-totals"
 import { writeMoyskladLog } from "./logs"
 import { getMoyskladConfig } from "./config"
@@ -865,14 +866,13 @@ export async function syncOrderToMoyskladById(payload: Payload, orderId: string 
 }
 
 /**
- * Fetches the set of externalCodes of customer orders that already exist in
- * MoySklad. Site orders are pushed with externalCode = local order id and under
- * the configured organization, so the list is bounded to that organization.
- * One (rarely a few) paginated list calls replace a per-order search.
+ * Fetch remote documents for the unchanged-order check. Only a verified UUID,
+ * number, organization and counterparty can establish that an order exists.
+ * A reused numeric database ID is never proof of identity.
  */
-async function fetchMoyskladOrderExternalCodes(): Promise<Set<string>> {
+async function fetchMoyskladOrders(): Promise<Map<string, MoyskladCustomerOrder>> {
   const config = getMoyskladConfig()
-  const codes = new Set<string>()
+  const codes = new Map<string, MoyskladCustomerOrder>()
   const pageSize = 1000
   const maxPages = 50
 
@@ -888,8 +888,7 @@ async function fetchMoyskladOrderExternalCodes(): Promise<Set<string>> {
     })
     const rows = result.rows || []
     for (const row of rows) {
-      if (row.externalCode) codes.add(String(row.externalCode))
-      if (row.name) codes.add(String(row.name))
+      if (row.id) codes.set(row.id, row)
     }
     if (rows.length < pageSize) break
   }
@@ -899,7 +898,7 @@ async function fetchMoyskladOrderExternalCodes(): Promise<Set<string>> {
 
 /**
  * True when the order is already correctly synced to MoySklad and does not need
- * to be re-pushed: it is present in MoySklad (by externalCode/name) AND its
+ * to be re-pushed: its saved UUID and identity are verified in MoySklad AND its
  * current content hash still matches the hash stored at the last successful
  * sync. Presence alone is not enough — an admin can edit an order (e.g. change
  * a quantity) after it was pushed, and that edit must still go out on the next
@@ -909,15 +908,19 @@ async function fetchMoyskladOrderExternalCodes(): Promise<Set<string>> {
  */
 function isOrderUpToDateInMoysklad(
   order: PayloadOrderDoc,
-  moyskladKeys: Set<string> | null
+  moyskladKeys: Map<string, MoyskladCustomerOrder> | null
 ): boolean {
-  // Если заказа нет в МойСклад — точно выгружаем, попутно это убирает ошибку
-  // 3006 (нарушение уникальности name при попытке создать дубль) для случая,
-  // когда заказ уже есть, но контент не менялся.
   if (!moyskladKeys) return false
-  const presentInMoysklad =
-    (order.orderId ? moyskladKeys.has(order.orderId) : false) || moyskladKeys.has(String(order.id))
-  if (!presentInMoysklad) return false
+  if (!order.moyskladCustomerOrderId) return false
+  const remote = moyskladKeys.get(order.moyskladCustomerOrderId)
+  if (!remote) return false
+  try {
+    const channel = order.salesChannel || (order.customerType === "individual" ? "retail" : "wholesale")
+    assertRemoteOrderIdentity(remote, order, getMoyskladConfig(channel).organizationId, order.moyskladCounterpartyId)
+    assertRemoteOrderTotalsConsistent(remote)
+  } catch {
+    return false
+  }
 
   if (!order.moyskladSyncedHash) return false
   const currentHash = computeOrderContentHash(order)
@@ -1003,7 +1006,7 @@ export async function retryFailedMoyskladOrders(payload: Payload, options: Retry
   // instead of re-pushing every order.
   const compareWithMoysklad = Boolean(orderIds) || includeExisting || includeAllUnexported
   const moyskladExternalCodes = compareWithMoysklad && candidates.length > 0
-    ? await fetchMoyskladOrderExternalCodes().catch(() => null)
+    ? await fetchMoyskladOrders().catch(() => null)
     : null
 
   const toSync: PayloadOrderDoc[] = []

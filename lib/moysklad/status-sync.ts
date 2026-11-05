@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import type { MoyskladCustomerOrder } from "./types"
 import type { OrderStatus } from "@/types"
 import { getPool } from "@/lib/db"
+import { assertRemoteOrderIdentity, assertRemoteOrderTotalsConsistent } from "./order-identity"
 
 type PaymentStatus = "pending" | "invoiced" | "partial" | "paid" | "refunded" | "cancelled" | "failed"
 
@@ -23,6 +24,7 @@ interface PayloadOrderForStatus {
   salesChannel?: string
   paymentMethod?: string
   moyskladCustomerOrderId?: string | null
+  moyskladCounterpartyId?: string | null
   client?: PayloadClientForStatus | string | number | null
 }
 
@@ -184,6 +186,9 @@ async function syncLinkedMoyskladOrderStatuses(payload: Payload, options: SyncOr
 
     try {
       const moyskladOrder = await fetchMoyskladOrder(moyskladCustomerOrderId)
+      const channel = order.salesChannel === "retail" || (!order.salesChannel && order.customerType === "individual") ? "retail" : "wholesale"
+      assertRemoteOrderIdentity(moyskladOrder, order, getMoyskladConfig(channel).organizationId, order.moyskladCounterpartyId)
+      assertRemoteOrderTotalsConsistent(moyskladOrder)
       const nextStatus = mapMoyskladStateToOrderStatus(moyskladOrder.state?.name)
       if (!nextStatus) {
         throw new Error(`Неизвестный статус МойСклад: ${moyskladOrder.state?.name || "не указан"}`)

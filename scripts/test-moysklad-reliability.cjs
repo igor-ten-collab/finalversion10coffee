@@ -28,6 +28,15 @@ function fixture({ respond, config: overrides = {}, signalAPI = AbortSignal, onD
     const response = await respond?.(call, calls.length)
     if (response) return response
     if (call.method === 'GET' && requestPath.includes('?')) return Response.json({ rows: [] })
+    if (call.method === 'GET' && requestPath.startsWith('entity/customerorder/')) return Response.json({
+      id: requestPath.split('/').pop(), name: params.order.orderId, externalCode: String(params.order.id),
+      organization: { id: config.organizationId }, agent: { id: params.client.moyskladCounterpartyId || 'counterparty' },
+    })
+    if (call.method === 'GET' && requestPath.startsWith('entity/invoiceout/')) return Response.json({
+      id: requestPath.split('/').pop(), externalCode: params.order.orderId + '-invoice',
+      organization: { id: config.organizationId }, agent: { id: params.client.moyskladCounterpartyId || 'counterparty' },
+      customerOrder: { id: params.order.moyskladCustomerOrderId || 'remote-id' },
+    })
     if (requestPath.startsWith('entity/variant/')) return Response.json({ id: 'variant', name: 'Coffee 250g' })
     if (requestPath.startsWith('entity/product/')) return Response.json({ id: 'product' })
     if (call.method === 'POST' || call.method === 'PUT') return Response.json({ id: 'remote-id' })
@@ -66,6 +75,7 @@ function fixture({ respond, config: overrides = {}, signalAPI = AbortSignal, onD
       if (Object.hasOwn(mocks, target)) return mocks[target]
       if (['crypto', 'node:crypto'].includes(target)) return require('node:crypto')
       if (target === 'node:util') return require('node:util')
+      if (target === 'lib/moysklad/order-identity') return load(target)
       if (['lib/moysklad/status-sync', 'payload/collections/Orders', 'lib/moysklad/client', 'lib/moysklad/sync', 'lib/moysklad/bundles', 'lib/moysklad/order-totals', 'lib/moysklad/order-eligibility', 'lib/moysklad/order-link-repair', 'lib/moysklad/order-hash', 'lib/moysklad/order-link-service', 'lib/moysklad/order-link-endpoint', 'lib/moysklad/order-retry', 'lib/moysklad/import-catalog', 'lib/moysklad/products', 'lib/slug', 'lib/discounts', 'lib/product-types', 'payload/access/adminRoles', 'lib/actions/products', 'lib/actions/shop-orders', 'lib/utils/phone', 'lib/payments/yookassa-receipt', 'lib/payments/yookassa-order-status', 'app/api/shop/payments/yookassa/webhook/route'].includes(target)) return load(target)
       throw new Error(`Unexpected dependency: ${id}`)
     }
@@ -135,10 +145,12 @@ for (const [label, options] of [
 
 test('bulk retry skips the exception, still exports another order and counts unchanged orders separately', async () => {
   const excluded = historicalOrder(), pending = retryOrder(161, 'TEST-NEW'), unchanged = retryOrder(162, 'TEST-SYNCED')
+  unchanged.moyskladCustomerOrderId = 'synced-remote'
   const f = retryFixture([excluded, pending, unchanged], call => {
     if (call.method === 'GET' && call.path.startsWith('entity/customerorder?')
       && new URLSearchParams(call.path.split('?')[1]).get('filter')?.startsWith('organization=')) {
-      return Response.json({ rows: [{ id: 'synced-remote', name: unchanged.orderId, externalCode: String(unchanged.id) }] })
+      return Response.json({ rows: [{ id: 'synced-remote', name: unchanged.orderId, externalCode: String(unchanged.id),
+        organization: { id: 'organization' }, agent: { id: 'counterparty' } }] })
     }
     if (call.method === 'POST' && call.path === 'entity/customerorder') return Response.json({ id: 'new-remote', sum: 50000 })
   })
@@ -576,7 +588,7 @@ test('failed stock loss lookup never creates a second stock loss', async () => {
 })
 
 test('failed linked counterparty read does not clear the company link or create a replacement', async () => {
-  const f = fixture({ respond: c => c.method === 'GET' ? unavailable() : undefined })
+  const f = fixture({ respond: c => c.method === 'GET' && c.path.startsWith('entity/counterparty/') ? unavailable() : undefined })
   f.params.company = { id: 'company', inn: '1234567890', moyskladCounterpartyId: 'linked' }
   const result = await f.sync.syncOrderToMoysklad(f.params)
   assert.match(result.error, /GET entity\/counterparty\/linked/)
@@ -633,12 +645,15 @@ for (const entity of ['customerorder', 'invoiceout']) {
 
   test(`${entity} created by a concurrent export is reused by external code without resetting order state`, async () => {
     let lookups = 0
-    const externalCode = entity === 'customerorder' ? '382' : '10C-00382-invoice'
+    const externalCode = entity === 'customerorder' ? '10coffee-order-10C-00382' : '10C-00382-invoice'
     const f = fixture({ config: { createInvoiceOnOrder: entity === 'invoiceout', defaultOrderStateId: 'new-state' }, respond: c => {
       if (c.method === 'GET' && c.path.startsWith(`entity/${entity}?`)) {
         const query = new URLSearchParams(c.path.split('?')[1])
+        if (query.get('filter') === 'externalCode=382') return Response.json({ rows: [] })
         assert.equal(query.get('filter'), `externalCode=${externalCode}`)
-        return Response.json({ rows: ++lookups === 1 ? [] : [{ id: 'concurrent-id', externalCode }] })
+        return Response.json({ rows: ++lookups === 1 ? [] : [{ id: 'concurrent-id', externalCode,
+          name: '10C-00382', organization: { id: 'organization' }, agent: { id: 'counterparty' },
+          customerOrder: { id: 'remote-id' } }] })
       }
       if (c.path === `entity/${entity}` && c.method === 'POST') return uniquenessConflict()
       if (c.path === `entity/${entity}/concurrent-id` && c.method === 'PUT') return Response.json({ id: 'concurrent-id' })
@@ -655,7 +670,7 @@ for (const entity of ['customerorder', 'invoiceout']) {
 
   test(`${entity} explicitly in trash is not deleted or recreated`, async () => {
     const f = fixture({ config: { createInvoiceOnOrder: entity === 'invoiceout' }, respond: c => {
-      if (c.method === 'PUT' && c.path === `entity/${entity}/trashed-id`) {
+      if (c.method === 'GET' && c.path === `entity/${entity}/trashed-id`) {
         return Response.json({ errors: [{ code: 3007, error: 'Документ находится в корзине' }] }, { status: 412 })
       }
     } })
@@ -671,7 +686,9 @@ for (const entity of ['customerorder', 'invoiceout']) {
 test('503 during conflict reconciliation stays an API failure and does not trigger another create', async () => {
   let lookups = 0
   const f = fixture({ respond: c => {
-    if (c.method === 'GET' && c.path.startsWith('entity/customerorder?') && ++lookups > 1) return unavailable()
+    if (c.method === 'GET' && c.path.startsWith('entity/customerorder?')
+      && new URLSearchParams(c.path.split('?')[1]).get('filter') === 'externalCode=10coffee-order-10C-00382'
+      && ++lookups > 1) return unavailable()
     if (c.path === 'entity/customerorder' && c.method === 'POST') return uniquenessConflict()
   } })
   const result = await f.sync.syncOrderToMoysklad(f.params)
@@ -858,6 +875,7 @@ function retailFixture({ account = false, promo, discountPercent = 0, loyaltyFai
     if (call.method === 'GET' && call.path.startsWith('entity/customerorder?')) {
       return Response.json({ rows: state.remote ? [state.remote] : [] })
     }
+    if (call.method === 'GET' && call.path.startsWith('entity/customerorder/')) return Response.json(state.remote)
     if (['POST', 'PUT'].includes(call.method) && call.path.startsWith('entity/customerorder')) {
       const body = JSON.parse(call.init.body)
       state.remote = { ...body, id: 'retail-order', sum: body.positions.reduce((sum, p) =>
@@ -1227,7 +1245,9 @@ function statusFixture(orders, remote = {}, config = {}, locked = true) {
     const id = call.path.match(/^entity\/customerorder\/([^?]+)\?expand=state$/)?.[1]
     if (!id) throw new Error('Status sync must only read linked customer orders')
     const state = remote[id] || { state: { name: 'Собран' }, sum: 50000, payedSum: 0 }
-    return state instanceof Response ? state : Response.json(state)
+    const local = orders.find(x => x.moyskladCustomerOrderId === id)
+    return state instanceof Response ? state : Response.json({ id, name: local?.orderId,
+      organization: { id: config.organizationId || 'organization' }, agent: { id: local?.moyskladCounterpartyId || 'counterparty' }, ...state })
   }, extraMocks: {
     'lib/order-line-discounts': {},
     'payload/admin/workspace': {},
@@ -1377,4 +1397,146 @@ test('status sync releases its global lock when the local query fails', async ()
   await assert.rejects(f.run, /database failure/)
   assert.match(f.locks.at(-2).sql, /pg_advisory_unlock/)
   assert.equal(f.locks.at(-1), 'released')
+})
+
+const remoteIdentity = fields => ({ id: 'old-remote', name: '10C-00382', externalCode: '382',
+  organization: { id: 'organization' }, agent: { id: 'counterparty' }, ...fields })
+const documentWrites = f => f.calls.filter(c => ['PUT', 'POST', 'DELETE'].includes(c.method)
+  && /^entity\/(customerorder|invoiceout)(\/|$)/.test(c.path))
+
+test('restored local ID collision creates a separate order and preserves all old documents', async () => {
+  const old = remoteIdentity({ name: '10C-00515', externalCode: '449', sum: 3615000,
+    agent: { id: 'old-buyer' }, moment: '2026-09-26 07:08:00',
+    invoicesOut: [{ id: 'old-invoice' }], demands: [{ id: 'old-shipment' }] })
+  const before = structuredClone(old)
+  const f = fixture({ respond: c => {
+    if (c.method === 'GET' && c.path.startsWith('entity/customerorder?')
+      && new URLSearchParams(c.path.split('?')[1]).get('filter') === 'externalCode=449') {
+      return Response.json({ rows: [old] })
+    }
+  } })
+  Object.assign(f.params.order, { id: 449, orderId: '10C-00543' })
+  assert.equal((await f.sync.syncOrderToMoysklad(f.params)).success, true)
+  const sent = JSON.parse(writes(f, 'customerorder')[0].init.body)
+  assert.equal(sent.externalCode, '10coffee-order-10C-00543')
+  assert.equal(sent.name, '10C-00543')
+  assert.equal(documentWrites(f).length, 1)
+  assert.equal(documentWrites(f)[0].method, 'POST')
+  assert.deepEqual(old, before)
+})
+
+for (const [label, changed] of [
+  ['order number', { name: '10C-00515' }],
+  ['organization', { organization: { id: 'another-organization' } }],
+  ['counterparty', { agent: { id: 'another-buyer' } }],
+  ['missing identity fields', { name: undefined, organization: undefined, agent: undefined }],
+]) {
+  test(`saved order link with wrong ${label} cannot overwrite a document even with force`, async () => {
+    const f = fixture({ respond: c => c.method === 'GET' && c.path === 'entity/customerorder/old-remote'
+      ? Response.json(remoteIdentity(changed)) : undefined })
+    f.params.order.moyskladCustomerOrderId = 'old-remote'
+    f.params.force = true
+    assert.ok((await f.sync.syncOrderToMoysklad(f.params)).error)
+    assert.equal(documentWrites(f).length, 0)
+    assert.equal(f.updates.some(x => Object.hasOwn(x.data, 'moyskladCustomerOrderId')), false)
+  })
+}
+
+test('a valid legacy numeric link can still update its own order without resetting the state', async () => {
+  const f = fixture({ respond: c => c.method === 'GET' && c.path.startsWith('entity/customerorder?')
+    && new URLSearchParams(c.path.split('?')[1]).get('filter') === 'externalCode=382'
+    ? Response.json({ rows: [remoteIdentity({ state: { id: 'ready' } })] }) : undefined })
+  assert.equal((await f.sync.syncOrderToMoysklad(f.params)).success, true)
+  const changed = documentWrites(f)
+  assert.equal(changed.length, 1)
+  assert.equal(changed[0].path, 'entity/customerorder/old-remote')
+  assert.equal(JSON.parse(changed[0].init.body).state, undefined)
+  assert.equal(JSON.parse(changed[0].init.body).externalCode, '382')
+})
+
+test('missing saved order UUID is an error and never clears links or recreates documents', async () => {
+  const f = fixture({ respond: c => c.path === 'entity/customerorder/missing' && c.method === 'GET'
+    ? Response.json({ errors: [{ code: 1021, error: 'not found' }] }, { status: 404 }) : undefined })
+  f.params.order.moyskladCustomerOrderId = 'missing'
+  assert.ok((await f.sync.syncOrderToMoysklad(f.params)).error)
+  assert.equal(documentWrites(f).length, 0)
+  assert.equal(f.updates.some(x => Object.hasOwn(x.data, 'moyskladCustomerOrderId')), false)
+})
+
+test('a namespaced key with another order name or duplicate matches never authorizes an update', async () => {
+  for (const rows of [[remoteIdentity({ name: 'OTHER' })], [remoteIdentity({}), remoteIdentity({ id: 'duplicate' })]]) {
+    const f = fixture({ respond: c => c.method === 'GET' && c.path.startsWith('entity/customerorder?')
+      ? Response.json({ rows }) : undefined })
+    assert.ok((await f.sync.syncOrderToMoysklad(f.params)).error)
+    assert.equal(documentWrites(f).length, 0)
+  }
+})
+
+for (const [label, changed] of [
+  ['another order', { customerOrder: { id: 'different-order' } }],
+  ['another buyer', { agent: { id: 'another-buyer' } }],
+  ['another organization', { organization: { id: 'another-organization' } }],
+]) {
+  test(`saved invoice belongs to ${label}: neither order nor invoice is changed`, async () => {
+    const f = fixture({ config: { createInvoiceOnOrder: true }, respond: c => c.method === 'GET' && c.path === 'entity/invoiceout/old-invoice'
+      ? Response.json({ ...remoteIdentity({ id: 'old-invoice' }), customerOrder: { id: 'old-remote' }, ...changed }) : undefined })
+    f.params.order.moyskladCustomerOrderId = 'old-remote'
+    f.params.order.moyskladInvoiceOutId = 'old-invoice'
+    assert.ok((await f.sync.syncOrderToMoysklad(f.params)).error)
+    assert.equal(documentWrites(f).length, 0)
+  })
+}
+
+test('concurrent creation conflict cannot overwrite another counterparty document', async () => {
+  let lookups = 0
+  const f = fixture({ respond: c => {
+    if (c.method === 'GET' && c.path.startsWith('entity/customerorder?')
+      && new URLSearchParams(c.path.split('?')[1]).get('filter') === 'externalCode=10coffee-order-10C-00382') {
+      return Response.json({ rows: ++lookups === 1 ? [] : [remoteIdentity({ agent: { id: 'another-buyer' } })] })
+    }
+    if (c.method === 'POST' && c.path === 'entity/customerorder') return uniquenessConflict()
+  } })
+  assert.match((await f.sync.syncOrderToMoysklad(f.params)).error, /контрагент/)
+  assert.equal(documentWrites(f).length, 1)
+  assert.equal(documentWrites(f)[0].method, 'POST')
+})
+
+test('00543 with old 36150-ruble financial links cannot be exported or import a shipped status', async () => {
+  const bad = remoteIdentity({ name: '10C-00543', sum: 100, invoicedSum: 3615000, shippedSum: 3615000, payedSum: 3615000 })
+  const f = fixture({ respond: c => c.method === 'GET' && c.path === 'entity/customerorder/old-remote'
+    ? Response.json(bad) : undefined })
+  Object.assign(f.params.order, { orderId: '10C-00543', moyskladCustomerOrderId: 'old-remote', total: 1 })
+  assert.match((await f.sync.syncOrderToMoysklad(f.params)).error, /сверка документов/)
+  assert.equal(documentWrites(f).length, 0)
+  const order = statusOrder(1, { orderId: '10C-00543' })
+  const incoming = statusFixture([order], { 'remote-1': { ...bad, state: { name: 'Отгружен' } } })
+  assert.equal((await incoming.run()).errors.length, 1)
+  assert.equal(order.status, 'paid')
+  assert.equal(order.paymentStatus, 'paid')
+  assert.equal(incoming.notifications.length, 0)
+})
+
+test('status import rejects a saved UUID pointing at another order', async () => {
+  const order = statusOrder(1)
+  const f = statusFixture([order], { 'remote-1': { name: 'OTHER', state: { name: 'Отгружен' } } })
+  const result = await f.run()
+  assert.equal(result.synced, 0)
+  assert.equal(result.errors.length, 1)
+  assert.equal(order.status, 'paid')
+  assert.equal(f.notifications.length, 0)
+})
+
+test('a restored ID collision cannot be marked unchanged using the old content hash', async () => {
+  const order = retryOrder(449, '10C-00543')
+  order.moyskladSyncedHash = fixture().load('lib/moysklad/order-hash').computeOrderContentHash(order)
+  const f = retryFixture([order], c => {
+    if (c.method === 'GET' && c.path.startsWith('entity/customerorder?')
+      && new URLSearchParams(c.path.split('?')[1]).get('filter')?.startsWith('organization=')) {
+      return Response.json({ rows: [remoteIdentity({ name: '10C-00515', externalCode: '449' })] })
+    }
+    if (c.method === 'POST' && c.path === 'entity/customerorder') return Response.json({ id: 'new-remote', sum: 50000 })
+  })
+  const result = await f.run()
+  assert.equal(result.succeeded, 1, JSON.stringify(result.retried))
+  assert.equal(writes(f, 'customerorder').length, 1)
 })

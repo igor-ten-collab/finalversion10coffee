@@ -79,6 +79,8 @@ export interface MoyskladVariant extends MoyskladAssortment {
 }
 
 export interface MoyskladCustomerOrder extends MoyskladEntity {
+  organization?: MoyskladEntity
+  agent?: MoyskladEntity
   externalCode?: string
   moment?: string
   sum?: number
@@ -89,6 +91,9 @@ export interface MoyskladCustomerOrder extends MoyskladEntity {
 }
 
 export interface MoyskladInvoiceOut extends MoyskladEntity {
+  organization?: MoyskladEntity
+  agent?: MoyskladEntity
+  customerOrder?: MoyskladEntity
   externalCode?: string
   moment?: string
   sum?: number

@@ -1,0 +1,82 @@
+# Coolify -> 10coffee -> Terminal. Paste this entire block.
+# Reads the site database and MoySklad; does not modify orders or documents.
+# Saves the returned documents in a private /tmp file for recovery evidence.
+# Prints identifiers, dates and totals only. Does not print credentials.
+node <<'NODE'
+const fs = require('node:fs');
+const pg = require('pg');
+const e = process.env;
+const number = '10C-00543';
+const base = 'https://api.moysklad.ru/api/remap/1.2/';
+const token = e.MOYSKLAD_TOKEN?.trim();
+const auth = token ? 'Bearer ' + token : e.MOYSKLAD_LOGIN && e.MOYSKLAD_PASSWORD
+  ? 'Basic ' + Buffer.from(e.MOYSKLAD_LOGIN + ':' + e.MOYSKLAD_PASSWORD).toString('base64') : null;
+const refId = value => value?.id || value?.meta?.href?.split('?')[0].split('/').pop() || null;
+const brief = x => ({ id: x.id, name: x.name, externalCode: x.externalCode, moment: x.moment,
+  created: x.created, updated: x.updated, totalRub: Number(x.sum || 0) / 100,
+  paidRub: Number(x.payedSum || 0) / 100, shippedRub: Number(x.shippedSum || 0) / 100,
+  agentId: refId(x.agent), organizationId: refId(x.organization),
+  customerOrderId: refId(x.customerOrder), state: x.state?.name,
+  linked: Object.fromEntries(['invoicesOut','demands','payments','facturesOut'].map(k =>
+    [k, Array.isArray(x[k]) ? x[k].map(refId) : []])) });
+async function get(path) {
+  const r = await fetch(base + path, { headers: { Authorization: auth, 'Accept-Encoding': 'gzip' },
+    signal: AbortSignal.timeout(20000) });
+  const data = await r.json();
+  if (!r.ok) throw Error('MoySklad HTTP ' + r.status + '; codes=' + (data.errors || []).map(x => x.code).join(','));
+  return data;
+}
+const db = new pg.Client({ connectionString: e.DATABASE_URL, ssl: false, connectionTimeoutMillis: 10000 });
+const evidence = { number, capturedAt: new Date().toISOString(), documents: [], audits: [], logs: [] };
+(async () => {
+  if (!auth) throw Error('MoySklad credentials are missing');
+  await db.connect();
+  await db.query('BEGIN READ ONLY');
+  await db.query("SET LOCAL statement_timeout='10s'");
+  const site = (await db.query(`SELECT id,order_id,status,payment_status,total,sales_channel,
+    moysklad_counterparty_id,moysklad_customer_order_id,moysklad_invoice_out_id,moysklad_sync_status,
+    created_at FROM public.orders WHERE order_id=$1`, [number])).rows;
+  evidence.site = site;
+  const candidates = new Set(site.map(x => x.moysklad_customer_order_id).filter(Boolean));
+  const found = await get('entity/customerorder?' + new URLSearchParams({filter: 'name=' + number, limit:'100'}));
+  for (const x of found.rows || []) if (x.id) candidates.add(x.id);
+  for (const x of site) {
+    const oldKey = await get('entity/customerorder?' + new URLSearchParams({filter:'externalCode=' + x.id,limit:'100'}));
+    for (const y of oldKey.rows || []) if (y.id) candidates.add(y.id);
+  }
+  if (candidates.size > 10) throw Error('Too many candidate orders; stopped without changes');
+  for (const id of candidates) {
+    if (!/^[a-f0-9-]{36}$/i.test(id)) throw Error('Invalid MoySklad UUID');
+    const remote = await get('entity/customerorder/' + id + '?expand=state');
+    evidence.documents.push({type:'customerorder', data:remote});
+    try { evidence.audits.push({id, data:await get('entity/customerorder/' + id + '/audit?limit=100')}); }
+    catch (error) { evidence.audits.push({id, error:error.message}); }
+    const refs = ['invoicesOut','demands','payments'].flatMap(k => Array.isArray(remote[k]) ? remote[k] : []);
+    for (const ref of refs.slice(0, 30)) {
+      const href = ref?.meta?.href;
+      if (typeof href !== 'string' || !href.startsWith(base)) continue;
+      const path = href.slice(base.length);
+      if (!/^entity\/(invoiceout|demand|paymentin|cashin)\/[a-f0-9-]{36}$/i.test(path)) continue;
+      if (evidence.documents.some(x => x.path === path)) continue;
+      evidence.documents.push({path,type:path.split('/')[1],data:await get(path)});
+    }
+  }
+  evidence.logs = (await db.query(`SELECT id,created_at,entity_type,local_id,moysklad_id,direction,status,
+    payload->>'name' AS sent_name,payload->>'externalCode' AS sent_external_code,
+    response->>'name' AS remote_name,response->>'moment' AS remote_moment,
+    response->>'sum' AS remote_sum,response->>'externalCode' AS remote_external_code
+    FROM public.moysklad_sync_logs WHERE local_id=ANY($1::text[]) OR moysklad_id=ANY($2::text[])
+    ORDER BY created_at DESC LIMIT 50`, [site.map(x => String(x.id)), [...candidates]])).rows;
+  await db.query('ROLLBACK');
+  const file = '/tmp/10coffee-ms-00543-' + Date.now() + '.json';
+  fs.writeFileSync(file, JSON.stringify(evidence,null,2), {mode:0o600,flag:'wx'});
+  console.log(JSON.stringify({exportNewOrders:e.MOYSKLAD_SYNC_ORDERS_ON_CREATE,site,
+    documents:evidence.documents.map(x => ({type:x.type,...brief(x.data)})),
+    audit:evidence.audits.map(x => ({id:x.id,error:x.error,events:x.data?.meta?.size ?? x.data?.rows?.length,
+      latest:(x.data?.rows || []).slice(0,12).map(y => ({id:y.id,moment:y.moment,eventType:y.eventType,
+        changedFields:Object.keys(y.diff || {}),
+        changes:Object.fromEntries(['name','externalCode','moment','sum'].filter(k => y.diff?.[k]).map(k => [k,y.diff[k]]))}))})),
+    logs:evidence.logs,evidenceFile:file},null,2));
+})().catch(error => { console.error(JSON.stringify({error:error.code || error.message})); process.exitCode=1; })
+  .finally(async () => { await db.end().catch(() => {}); });
+NODE

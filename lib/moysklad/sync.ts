@@ -6,6 +6,7 @@ import { hasMoyskladErrorCode, MoyskladApiError, extractMoyskladId, moyskladGetL
 import { writeMoyskladLog } from "./logs"
 import { computeOrderContentHash } from "./order-hash"
 import { canExportOrderToMoysklad } from "./order-eligibility"
+import { orderExternalCode, assertRemoteOrderIdentity, assertRemoteInvoiceIdentity, assertRemoteOrderTotalsConsistent } from "./order-identity"
 import { assertMoyskladDocumentTotal, reconcileMoyskladOrderTotals, type MoyskladDiscountLine } from "./order-totals"
 import { DELIVERY_METHOD_LABELS } from "@/lib/utils/constants"
 import { ensureMoyskladBundleForVariant } from "./bundles"
@@ -717,19 +718,54 @@ function buildDocumentRefs(params: {
 async function findCustomerOrderByExternalCode(externalCode: string) {
   const result = await moyskladGetList<MoyskladCustomerOrder>("entity/customerorder", {
     filter: `externalCode=${externalCode}`,
-    limit: 1,
+    limit: 2,
   })
 
+  if (result.rows.length > 1 || result.meta?.size > 1) throw new Error("Несколько заказов МойСклад имеют один внешний код; выгрузка остановлена")
   return result.rows[0] || null
 }
 
 async function findInvoiceOutByExternalCode(externalCode: string) {
   const result = await moyskladGetList<MoyskladInvoiceOut>("entity/invoiceout", {
     filter: `externalCode=${externalCode}`,
-    limit: 1,
+    limit: 2,
   })
 
+  if (result.rows.length > 1 || result.meta?.size > 1) throw new Error("Несколько счетов МойСклад имеют один внешний код; выгрузка остановлена")
   return result.rows[0] || null
+}
+
+async function readExistingOrder(order: SyncOrder, config: MoyskladConfig) {
+  const code = orderExternalCode(order)
+  if (order.moyskladCustomerOrderId) {
+    // An invalid saved link must be repaired explicitly. Never silently
+    // unlink/recreate an order because its old UUID is missing or in trash.
+    return moyskladRequest<MoyskladCustomerOrder>(`entity/customerorder/${order.moyskladCustomerOrderId}`)
+  }
+  const current = await findCustomerOrderByExternalCode(code)
+  if (current) return current
+  const legacy = await findCustomerOrderByExternalCode(String(order.id))
+  // A numeric-ID collision is not this site's order. Keep the old document
+  // intact and create the new order under its durable key instead.
+  if (!legacy || legacy.name !== order.orderId) return null
+  assertRemoteOrderIdentity(legacy, order, config.organizationId)
+  return legacy
+}
+
+async function readExistingInvoice(order: SyncOrder, customerOrderId: string | null, counterpartyId: string, config: MoyskladConfig) {
+  let invoice: MoyskladInvoiceOut | null
+  try {
+    invoice = order.moyskladInvoiceOutId
+      ? await moyskladRequest<MoyskladInvoiceOut>(`entity/invoiceout/${order.moyskladInvoiceOutId}`)
+      : await findInvoiceOutByExternalCode(`${order.orderId}-invoice`)
+  } catch (error) {
+    if (isMoyskladTrashOperationError(error)) {
+      throw new MoyskladTrashedOrderError(`Счёт к заказу ${order.orderId} находится в корзине МойСклад. Восстановите его и проверьте связь`)
+    }
+    throw error
+  }
+  if (invoice) assertRemoteInvoiceIdentity(invoice, order.orderId!, customerOrderId || "", config.organizationId, counterpartyId)
+  return invoice
 }
 
 function documentUniquenessConflict(label: string) {
@@ -768,11 +804,8 @@ async function createInvoiceOut(params: {
     },
   }
 
-  let invoiceId = params.order.moyskladInvoiceOutId || null
-  if (!invoiceId) {
-    const existing = await findInvoiceOutByExternalCode(externalCode)
-    invoiceId = extractMoyskladId(existing)
-  }
+  const existingInvoice = await readExistingInvoice(params.order, params.moyskladOrderId, params.counterpartyId, params.config)
+  const invoiceId = extractMoyskladId(existingInvoice)
 
   if (invoiceId) {
     try {
@@ -792,8 +825,6 @@ async function createInvoiceOut(params: {
         throw new MoyskladTrashedOrderError(
           `Счёт к заказу ${params.order.orderId || params.order.id} находится в корзине МойСклад. Восстановите его в МойСклад и повторите выгрузку.`
         )
-      } else if (hasMoyskladErrorCode(error, 1021)) {
-        invoiceId = null
       } else {
         throw error
       }
@@ -818,6 +849,7 @@ async function createInvoiceOut(params: {
     const conflicting = await findInvoiceOutByExternalCode(externalCode)
     const conflictingId = extractMoyskladId(conflicting)
     if (conflictingId) {
+      assertRemoteInvoiceIdentity(conflicting!, params.order.orderId!, params.moyskladOrderId, params.config.organizationId, params.counterpartyId)
       const updated = await moyskladRequest<MoyskladInvoiceOut>(`entity/invoiceout/${conflictingId}`, {
         method: "PUT",
         body: JSON.stringify(invoiceBody),
@@ -1000,6 +1032,20 @@ export async function syncOrderToMoysklad(params: SyncOrderParams) {
 
   try {
     assertMoyskladReady(config)
+    const externalCode = orderExternalCode(params.order)
+    let existingOrder: MoyskladCustomerOrder | null
+    try {
+      existingOrder = await readExistingOrder(params.order, config)
+    } catch (error) {
+      if (isMoyskladTrashOperationError(error)) {
+        throw new MoyskladTrashedOrderError(`Заказ ${params.order.orderId} находится в корзине МойСклад, пропущен`)
+      }
+      throw error
+    }
+    if (existingOrder) {
+      assertRemoteOrderIdentity(existingOrder, params.order, config.organizationId)
+      assertRemoteOrderTotalsConsistent(existingOrder)
+    }
 
     await params.payload.update({
       collection: "orders",
@@ -1014,6 +1060,12 @@ export async function syncOrderToMoysklad(params: SyncOrderParams) {
 
     const counterpartyId = await ensureCounterparty(params.payload, params.client, params.company, config)
     counterpartyIdForUpdate = counterpartyId
+    if (existingOrder) assertRemoteOrderIdentity(existingOrder, params.order, config.organizationId, counterpartyId)
+    // Validate a saved invoice before changing the order it purports to belong
+    // to. A conflicting invoice must not leave a half-updated customer order.
+    if (params.order.moyskladInvoiceOutId || (config.createInvoiceOnOrder && existingOrder)) {
+      await readExistingInvoice(params.order, extractMoyskladId(existingOrder), counterpartyId, config)
+    }
     const salesChannelId = await ensureSalesChannel(config)
     let positionVat = config.defaultVat
     if (config.vatEnabled && positionVat <= 0) {
@@ -1065,7 +1117,7 @@ export async function syncOrderToMoysklad(params: SyncOrderParams) {
         createdAt: params.order.createdAt,
       }, config),
       name: params.order.orderId || String(orderId),
-      externalCode: String(orderId),
+      externalCode: existingOrder?.externalCode || externalCode,
     }
 
     if (config.defaultOrderStateId) {
@@ -1074,13 +1126,7 @@ export async function syncOrderToMoysklad(params: SyncOrderParams) {
 
     let orderResponse: MoyskladCustomerOrder | null = null
     let orderMessage: string | undefined
-    let moyskladOrderId = params.order.moyskladCustomerOrderId || null
-
-    if (!moyskladOrderId) {
-      // A failed lookup is not evidence that the document does not exist.
-      const existing = await findCustomerOrderByExternalCode(String(orderId))
-      moyskladOrderId = extractMoyskladId(existing)
-    }
+    let moyskladOrderId = extractMoyskladId(existingOrder)
 
     if (moyskladOrderId) {
       delete body.state
@@ -1096,20 +1142,7 @@ export async function syncOrderToMoysklad(params: SyncOrderParams) {
             `Заказ ${params.order.orderId || String(orderId)} находится в корзине МойСклад, пропущен`
           )
         }
-        if (hasMoyskladErrorCode(error, 1021)) {
-          moyskladOrderId = null
-          if (config.defaultOrderStateId) {
-            body.state = { meta: moyskladMeta("state", config.defaultOrderStateId) }
-          }
-          await params.payload.update({
-            collection: "orders",
-            id: orderId,
-            data: { moyskladCustomerOrderId: null, moyskladInvoiceOutId: null },
-            overrideAccess: true,
-          }).catch(() => {})
-        } else {
-          throw error
-        }
+        throw error
       }
     }
 
@@ -1122,12 +1155,15 @@ export async function syncOrderToMoysklad(params: SyncOrderParams) {
       } catch (error) {
         if (!hasMoyskladErrorCode(error, 3006)) throw error
 
-        // Reconcile only by this order's external code. A matching name alone
-        // does not authorize overwriting another document or deleting it.
-        const conflicting = await findCustomerOrderByExternalCode(String(orderId))
+        // A concurrent create is reusable only after verifying its complete
+        // identity. Neither a numeric local ID nor a name alone authorizes PUT.
+        const conflicting = await findCustomerOrderByExternalCode(externalCode)
         const conflictingId = extractMoyskladId(conflicting)
         if (conflictingId) {
+          assertRemoteOrderIdentity(conflicting!, params.order, config.organizationId, counterpartyId)
+          assertRemoteOrderTotalsConsistent(conflicting!)
           delete body.state
+          body.externalCode = conflicting!.externalCode || externalCode
           orderResponse = await moyskladRequest<MoyskladCustomerOrder>(`entity/customerorder/${conflictingId}`, {
             method: "PUT",
             body: JSON.stringify(body),
