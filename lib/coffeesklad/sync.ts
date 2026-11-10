@@ -42,6 +42,7 @@ interface StoredOrder {
   paymentStatus?: string | null
   coffeeskladSyncStatus?: string | null
   coffeeskladOrderNumber?: string | null
+  createdAt?: string | null
   items?: StoredOrderItem[]
 }
 
@@ -234,6 +235,8 @@ export async function syncOrderToCoffeeskladById(
       // Номер заказа сайта (10C-…): КофеСклад сохраняет его как номер заказа,
       // чтобы нумерация на сайте и в учёте совпадала.
       number: order.orderId ? String(order.orderId) : undefined,
+      // Момент создания заказа: КофеСклад хранит дату и время документа.
+      order_created: order.createdAt ? String(order.createdAt) : undefined,
       customer: {
         name: (isBusiness ? order.companyName : order.customerFullName) || order.customerFullName || "Покупатель 10coffee",
         inn: isBusiness ? (order.companyInn || "") : "",
