@@ -95,6 +95,9 @@ const DEFAULT_TYPE = { slug: "equipment", name: "Оборудование и а�
 // группируем фасовки по продуктам
 const products = new Map() // key → { name, type, categoryName, variants: Map(weightLabel → {sku, skuGround, price, weightGrams, ground}) }
 for (const item of items) {
+  // На сайт попадают только позиции со штрихкодом: без штрихкода — это услуги,
+  // запчасти и прочая учётная номенклатура, витрине она не нужна.
+  if (!item.barcode) continue
   const { typeName, categoryName } = normalizeGroup(item.group_name)
   const type = TYPE_MAP[typeName.toLowerCase()] || DEFAULT_TYPE
 
