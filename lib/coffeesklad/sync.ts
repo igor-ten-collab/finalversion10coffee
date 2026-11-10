@@ -211,6 +211,8 @@ export async function syncOrderToCoffeeskladById(
     const isBusiness = order.customerType === "business" || Boolean(order.companyName)
     const body = {
       external_id: String(order.id),
+      // Канал продаж: КофеСклад показывает в колонке «Источник» — Опт или Магазин.
+      channel: order.salesChannel === "wholesale" ? ("wholesale" as const) : ("retail" as const),
       // Номер заказа сайта (10C-…): КофеСклад сохраняет его как номер заказа,
       // чтобы нумерация на сайте и в учёте совпадала.
       number: order.orderId ? String(order.orderId) : undefined,
