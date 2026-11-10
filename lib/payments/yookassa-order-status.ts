@@ -3,6 +3,7 @@ import config from "@payload-config"
 import { getYooKassaPayment } from "@/lib/payments/yookassa"
 import { sendPaidOrderConfirmation } from "@/lib/payments/paid-order-email"
 import { syncOrderToMoyskladById } from "@/lib/moysklad/order-retry"
+import { syncOrderToCoffeeskladById } from "@/lib/coffeesklad/sync"
 import { finalizeLoyaltyForPaidOrder, releaseLoyaltyReservation } from "@/lib/loyalty"
 import { createYandexDeliveryRequestForPaidOrder } from "@/lib/yandex-delivery"
 import { getPool } from "@/lib/db"
@@ -72,6 +73,22 @@ export async function refreshYooKassaOrderPayment(reference: string, referenceKi
         console.error(`[Order ${order.orderId || order.id}] Не удалось выгрузить оплаченный заказ в МойСклад: ${moyskladError}`)
       }
     }
+    // Оплаченный розничный заказ уходит в КофеСклад независимо от выгрузки в
+    // МойСклад: ошибка одной системы не блокирует другую.
+    let coffeeskladSynced: boolean | null = null
+    let coffeeskladError: string | null = null
+    if (payment.status === "paid" && (order as { coffeeskladSyncStatus?: string | null }).coffeeskladSyncStatus !== "synced") {
+      const sync = await syncOrderToCoffeeskladById(payload, order.id)
+      if (sync.error) {
+        coffeeskladSynced = false
+        coffeeskladError = sync.error
+        console.error(`[Order ${order.orderId || order.id}] Не удалось выгрузить оплаченный заказ в КофеСклад: ${sync.error}`)
+      } else if (sync.skipped) {
+        coffeeskladSynced = null
+      } else {
+        coffeeskladSynced = true
+      }
+    }
     if (payment.status === "paid" && !order.cartClearedAt) {
       const cartCleanup = await clearPaidOrderCart(payload, order, {
         allowLegacyFullClear: order.paymentStatus !== "paid",
@@ -136,6 +153,8 @@ export async function refreshYooKassaOrderPayment(reference: string, referenceKi
       confirmationEmailSent: email?.sent ?? null,
       moyskladSynced,
       moyskladError,
+      coffeeskladSynced,
+      coffeeskladError,
       yandexDeliveryCreated,
       yandexDeliveryError,
     }

@@ -36,6 +36,7 @@ import * as migration_20260828_110000_shop_popup_appearance from './20260828_110
 import * as migration_20260831_130000_paid_order_cart_cleanup from './20260831_130000_paid_order_cart_cleanup.ts';
 import * as migration_20260902_150000_client_promo_codes from './20260902_150000_client_promo_codes.ts';
 import * as migration_20260902_170000_product_brewing_guide_selection from './20260902_170000_product_brewing_guide_selection.ts';
+import * as migration_20261110_120000_coffeesklad_integration from './20261110_120000_coffeesklad_integration.ts';
 
 export const migrations = [
   {
@@ -227,5 +228,10 @@ export const migrations = [
     up: migration_20260902_170000_product_brewing_guide_selection.up,
     down: migration_20260902_170000_product_brewing_guide_selection.down,
     name: '20260902_170000_product_brewing_guide_selection'
+  },
+  {
+    up: migration_20261110_120000_coffeesklad_integration.up,
+    down: migration_20261110_120000_coffeesklad_integration.down,
+    name: '20261110_120000_coffeesklad_integration'
   },
 ];

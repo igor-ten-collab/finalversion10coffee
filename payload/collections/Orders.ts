@@ -576,6 +576,37 @@ export const Orders: CollectionConfig = {
         description: "Служебное поле: хэш состава заказа на момент успешной выгрузки в МойСклад.",
       },
     },
+    {
+      name: "coffeeskladSyncStatus",
+      type: "select",
+      label: "КофеСклад",
+      defaultValue: "disabled",
+      options: [
+        { label: "Ожидает", value: "pending" },
+        { label: "Синхронизирован", value: "synced" },
+        { label: "Ошибка", value: "error" },
+        { label: "Отключено", value: "disabled" },
+      ],
+      admin: { position: "sidebar" },
+    },
+    {
+      name: "coffeeskladOrderNumber",
+      type: "text",
+      label: "Номер заказа в КофеСклад",
+      admin: { position: "sidebar", readOnly: true },
+    },
+    {
+      name: "coffeeskladSyncedAt",
+      type: "date",
+      label: "Выгружен в КофеСклад",
+      admin: { position: "sidebar", readOnly: true },
+    },
+    {
+      name: "coffeeskladSyncError",
+      type: "textarea",
+      label: "Ошибка КофеСклад",
+      admin: { position: "sidebar", readOnly: true },
+    },
 
     // === Main content (tabs) ===
     {

@@ -19,6 +19,7 @@ import { revalidatePath } from "next/cache"
 import { createSmtpTransport } from "@/lib/email/smtp"
 import type { Order, OrderItem, OrderStatus, DeliveryMethod } from "@/types"
 import { buildMoyskladStockLossLines, syncOrderToMoysklad } from "@/lib/moysklad/sync"
+import { syncOrderToCoffeeskladById } from "@/lib/coffeesklad/sync"
 import type { CustomerSessionScope } from "@/lib/auth/constants"
 import { calculateTariff } from "@/lib/cdek"
 import {
@@ -905,6 +906,11 @@ export async function createOrder(params: {
   }
 
   revalidatePath("/dashboard")
+
+  // Выгрузка в КофеСклад (основная учётная система). Идёт независимо от
+  // результата МойСклад и никогда не отменяет оформление заказа.
+  await syncOrderToCoffeeskladById(payload, doc.id)
+
   return { success: true, orderId: String(doc.id), moyskladInvoiceCreated: hasMoyskladInvoice }
 }
 

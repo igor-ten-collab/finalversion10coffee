@@ -227,6 +227,14 @@ export const Products: CollectionConfig = {
           label: "Артикул (SKU)",
         },
         {
+          name: "skuGround",
+          type: "text",
+          label: "Артикул молотого (SKU)",
+          admin: {
+            description: "Штрихкод КофеСклад для молотого варианта этой фасовки. В sku — штрихкод зернового.",
+          },
+        },
+        {
           name: "moyskladId",
           type: "text",
           label: "ID позиции в МойСклад",

@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import nextEnv from '@next/env'
 import { startMoyskladStatusScheduler } from './moysklad-status-scheduler.mjs'
 import { startYooKassaPaymentScheduler } from './yookassa-payment-scheduler.mjs'
+import { startCoffeeskladStatusScheduler } from './coffeesklad-status-scheduler.mjs'
 
 export function startApplication({
   appProcess = process,
@@ -10,6 +11,7 @@ export function startApplication({
   loadEnvironment = nextEnv.loadEnvConfig,
   startScheduler = startMoyskladStatusScheduler,
   startPaymentScheduler = startYooKassaPaymentScheduler,
+  startCoffeeskladScheduler = startCoffeeskladStatusScheduler,
   logger = console,
 } = {}) {
   appProcess.env.NODE_ENV ||= 'production'
@@ -22,10 +24,12 @@ export function startApplication({
   })
   const stopScheduler = startScheduler({ env: appProcess.env })
   const stopPaymentScheduler = startPaymentScheduler({ env: appProcess.env })
+  const stopCoffeeskladScheduler = startCoffeeskladScheduler({ env: appProcess.env })
   const signalHandlers = new Map()
   const cleanup = () => {
     stopScheduler()
     stopPaymentScheduler()
+    stopCoffeeskladScheduler()
     for (const [signal, handler] of signalHandlers) appProcess.off(signal, handler)
   }
   for (const signal of ['SIGTERM', 'SIGINT']) {
