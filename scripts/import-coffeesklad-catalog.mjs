@@ -38,7 +38,7 @@ const TRANSLIT = {
   а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
   й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
   у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "",
-  э: "e", ю: "yu", я: "ya", "№": "n",
+  э: "e", ю: "yu", я: "ya", "№": "o",
 }
 function slugify(value) {
   return value.toLowerCase().split("").map((ch) => TRANSLIT[ch] ?? ch).join("")
@@ -54,6 +54,24 @@ function normalizeGroup(group) {
   return { typeName: parts[0] || "", categoryName: parts[1] || parts[0] || "Прочее" }
 }
 const capitalize = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s)
+
+// Явная привязка позиций КофеСклад к существующим товарам сайта,
+// у которых slug отличается от генерируемого (исторические названия с весом,
+// slug длиннее 80 символов). Иначе импорт создавал бы дубли на витрине.
+const SLUG_OVERRIDES = new Map([
+  ["Ассам (TGFOP)", "assam-tgfop-500g"],
+  ["Гречишный чай Ку Цяо", "grechishnyy-chay-ku-tsyao-500g"],
+  ["Матча Премиум", "matcha-premium-250g"],
+  ["Молочный Улун", "molochnyy-ulun-500g"],
+  ["Сенча", "sencha-500g"],
+  ["Те Гуань Инь", "te-guan-in-500g"],
+  ["Чай Конопляный Пуэр", "chay-konoplyanyy-puer-500g"],
+  ["Чай Спокойствие", "chay-spokoystvie-500g"],
+  ["Чай Травяной", "chay-travyanoy-500g"],
+  ["Эрл Грей", "erl-grey-500g"],
+  ["кофемашина Appia Life Compact 2Gr V 220V black+economizer+high groups Кофемашина-автомат, 2 группы (выс.), бойлер 7.5л, черная, экономайзер",
+   "kofemashina-appia-life-compact-2gr-v-220v-black-economizer-high-groups-kofemashina-avtomat-2-gruppy-vys-boyler-7-5l-chernaya-ekonomayzer"],
+])
 
 // ---------- загрузка каталога КофеСклад ----------
 const catalogRes = await fetch(`${COFFESKLAD_URL}/api/public/catalog`, {
@@ -175,7 +193,7 @@ let created = 0, updated = 0, skippedNoPrice = 0
 for (const product of products.values()) {
   const typeId = await ensureProductType(product.type)
   const categoryId = await ensureCategory(product.type, capitalize(product.categoryName), typeId)
-  const slug = slugify(product.name)
+  const slug = SLUG_OVERRIDES.get(product.name) || slugify(product.name)
   // сортировка вариантов: сначала крупная фасовка
   const variants = [...product.variants.values()]
     .sort((a, b) => (b.weightGrams || 0) - (a.weightGrams || 0))
