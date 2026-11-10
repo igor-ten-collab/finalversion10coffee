@@ -116,6 +116,9 @@ async function loadProductsByIds(payload: Payload, ids: string[]) {
 function resolveVariant(product: ProductDoc | undefined, item: StoredOrderItem): VariantDoc | undefined {
   const variants = product?.variants || []
   if (variants.length === 0) return undefined
+  // У товара единственная фасовка — выбираем её независимо от названия,
+  // сохранённого в заказе (в старых заказах вариант мог называться «1 шт»).
+  if (variants.length === 1) return variants[0]
   const target = normalizeText(item.variantName)
   const exact = variants.find((v) => normalizeText(v.name) === target)
   if (exact) return exact
