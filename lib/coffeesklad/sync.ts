@@ -36,6 +36,7 @@ interface StoredOrder {
   deliveryMethod?: DeliveryMethod | null
   deliveryAddress?: string | null
   deliveryCost?: number | string | null
+  total?: number | string | null
   comment?: string | null
   status?: string | null
   paymentStatus?: string | null
@@ -182,7 +183,21 @@ export async function syncOrderToCoffeeskladById(
     const products = await loadProductsByIds(payload, productIds)
     const vatRate = await resolveVatRate(payload)
 
-    const webhookItems = items.map((item) => {
+    // Скидка заказа (оптовая/промо) хранится на уровне заказа и не распределена
+    // по строкам. Распределяем пропорционально: коэффициент = (total − доставка) /
+    // сумма строк после построчных скидок. Без скидки коэффициент равен 1.
+    const rawLines = items.map((item) => ({
+      item,
+      price: lineDiscountedUnitPrice(item),
+      qty: numberValue(item.quantity),
+    }))
+    const linesSum = rawLines.reduce((s, l) => s + l.price * l.qty, 0)
+    const goodsTarget = numberValue(order.total) - numberValue(order.deliveryCost)
+    const orderFactor = linesSum > 0 && goodsTarget > 0
+      ? Math.min(1, goodsTarget / linesSum)
+      : 1
+
+    const webhookItems = rawLines.map(({ item, price, qty }) => {
       const product = products.get(String(item.productId || ""))
       const variant = resolveVariant(product, item)
       const grind = normalizeGrind(item.grindOption)
@@ -195,8 +210,8 @@ export async function syncOrderToCoffeeskladById(
       return {
         code: String(sku || "").trim(),
         name: `${productName} ${variantName}${grindLabel}`.trim(),
-        qty: numberValue(item.quantity),
-        price: lineDiscountedUnitPrice(item),
+        qty,
+        price: round2(price * orderFactor),
         vat_rate: vatRate,
       }
     })
