@@ -166,7 +166,8 @@ export async function runMoyskladCoffeeskladBridge({ env = process.env, logger =
       const src = { ...sales.find((s) => s.external_id === name) }
       src.customer = { name: full.agent?.name || "", inn: full.agent?.inn || "" }
       src.lines = positions.map((p) => ({
-        code: p.assortment?.code || p.assortment?.article || "",
+        code: p.assortment?.code || "",
+        article: p.assortment?.article || "",
         name: p.assortment?.name || "",
         qty: Number(p.quantity) || 0,
         price: (Number(p.price) || 0) / 100,
