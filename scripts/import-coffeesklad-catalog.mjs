@@ -219,9 +219,9 @@ for (const product of products.values()) {
     productTypeRef: typeId,
     category: categoryId,
     variants,
-    isVisible: anyPrice, // без цен скрываем с витрины до назначения цен в КофеСклад
   }
   if (existingProducts.has(slug)) {
+    // При обновлении isVisible не трогаем: видимостью управляет только админка сайта.
     const existing = existingProducts.get(slug)
     const existingVariants = Array.isArray(existing.variants) ? existing.variants : []
     if (existingVariants.length > 0) {
@@ -248,7 +248,8 @@ for (const product of products.values()) {
     }
     updated++
   } else {
-    await api("POST", "products", data)
+    // Новый товар: без цен скрываем с витрины до назначения цен в КофеСклад.
+    await api("POST", "products", { ...data, isVisible: anyPrice })
     created++
     console.log(`+ товар: ${product.name} [${variants.map((v) => `${v.name}${v.sku ? "=" + v.sku : ""}${v.skuGround ? "+" + v.skuGround : ""} ${v.price ?? "—"}₽`).join(", ")}]${anyPrice ? "" : " (скрыт, нет цен)"}`)
   }
