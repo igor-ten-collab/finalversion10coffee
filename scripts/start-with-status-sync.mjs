@@ -4,6 +4,7 @@ import nextEnv from '@next/env'
 import { startMoyskladStatusScheduler } from './moysklad-status-scheduler.mjs'
 import { startYooKassaPaymentScheduler } from './yookassa-payment-scheduler.mjs'
 import { startCoffeeskladStatusScheduler } from './coffeesklad-status-scheduler.mjs'
+import { startMoyskladCoffeeskladBridge } from './moysklad-coffeesklad-bridge.mjs'
 
 export function startApplication({
   appProcess = process,
@@ -12,6 +13,7 @@ export function startApplication({
   startScheduler = startMoyskladStatusScheduler,
   startPaymentScheduler = startYooKassaPaymentScheduler,
   startCoffeeskladScheduler = startCoffeeskladStatusScheduler,
+  startMsCsBridge = startMoyskladCoffeeskladBridge,
   logger = console,
 } = {}) {
   appProcess.env.NODE_ENV ||= 'production'
@@ -25,11 +27,13 @@ export function startApplication({
   const stopScheduler = startScheduler({ env: appProcess.env })
   const stopPaymentScheduler = startPaymentScheduler({ env: appProcess.env })
   const stopCoffeeskladScheduler = startCoffeeskladScheduler({ env: appProcess.env })
+  const stopMsCsBridge = startMsCsBridge({ env: appProcess.env })
   const signalHandlers = new Map()
   const cleanup = () => {
     stopScheduler()
     stopPaymentScheduler()
     stopCoffeeskladScheduler()
+    stopMsCsBridge()
     for (const [signal, handler] of signalHandlers) appProcess.off(signal, handler)
   }
   for (const signal of ['SIGTERM', 'SIGINT']) {
