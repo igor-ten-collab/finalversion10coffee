@@ -121,8 +121,9 @@ export async function runMoyskladCoffeeskladBridge({ env = process.env, logger =
     })
   }
 
-  // 2. Отгрузки МС (без позиций — позиции дотягиваем только для новых)
-  const msDemands = await msFetchAll("entity/demand?expand=agent", env)
+  // 2. Отгрузки МС (без expand: на выборках >100 строк МойСклад молча
+  // игнорирует expand). Позиции и контрагента дотягиваем только для новых.
+  const msDemands = await msFetchAll("entity/demand", env)
   const demandByName = new Map()
   const sales = []
   for (const d of msDemands) {
@@ -145,6 +146,7 @@ export async function runMoyskladCoffeeskladBridge({ env = process.env, logger =
   const first = await postMsSync(csBase, csKey, { orders, sales })
   logger.log(`[MS→CS bridge] заказы: обновлено ${first.orders_updated}, без пары ${first.orders_unknown.length}; ` +
     `отгрузки: обновлено ${first.sales_updated}, помечено ${first.sales_tagged}, нужны позиции ${first.sales_needed.length}`)
+  for (const n of first.orders_unknown || []) logger.warn(`[MS→CS bridge] заказ ${n} есть в МойСклад, но нет в КофеСклад`)
   for (const w of first.warnings || []) logger.warn(`[MS→CS bridge] ${w}`)
 
   // 4. Для неизвестных отгрузок дотягиваем позиции и создаём их в КофеСклад
@@ -154,8 +156,15 @@ export async function runMoyskladCoffeeskladBridge({ env = process.env, logger =
     const withLines = []
     for (const name of needed) {
       const d = demandByName.get(name)
-      const positions = await msFetchAll(`entity/demand/${d.id || metaId(d)}/positions?expand=assortment`, env)
+      const demandId = d.id || metaId(d)
+      // Полный документ с контрагентом + позиции с номенклатурой
+      // (expand на одиночном документе работает, в отличие от списка).
+      const [full, positions] = await Promise.all([
+        msFetch(`entity/demand/${demandId}?expand=agent`, env),
+        msFetchAll(`entity/demand/${demandId}/positions?expand=assortment`, env),
+      ])
       const src = { ...sales.find((s) => s.external_id === name) }
+      src.customer = { name: full.agent?.name || "", inn: full.agent?.inn || "" }
       src.lines = positions.map((p) => ({
         code: p.assortment?.code || p.assortment?.article || "",
         name: p.assortment?.name || "",
