@@ -1,10 +1,12 @@
 // Обратная синхронизация КофеСклад → сайт.
 // Общая логика для HTTP-роута (ручной запуск) и фонового планировщика.
 //
-// 1. Цены и наличие: КофеСклад /api/public/catalog → варианты (price, isAvailable,
-//    видимость товара) по артикулам sku/skuGround.
+// 1. Цены и наличие: КофеСклад /api/public/catalog → варианты (price, isAvailable)
+//    по артикулам sku/skuGround. Видимость товара (isVisible) синхронизация НЕ
+//    трогает: главенство — за галочкой «видим в каталоге» в админке сайта.
 // 2. Статусы заказов: КофеСклад /api/public/orders-status → orders.status по
-//    external_id (только для ещё не завершённых заказов сайта).
+//    external_id. Временно отключено (SYNC_ORDER_STATUSES = false): до полной
+//    настройки КофеСклад статусы заказов на сайте задаёт МойСклад.
 
 import type { Payload } from "payload"
 import { getCoffeeskladConfig, isCoffeeskladReady } from "./config"
@@ -80,7 +82,6 @@ export async function runCoffeeskladStatusSync(payload: Payload): Promise<Coffee
 
     for (const product of products.docs) {
       let changed = false
-      let anyAvailable = false
       const variants = (product.variants || []) as {
         id?: string
         name?: string
@@ -94,10 +95,7 @@ export async function runCoffeeskladStatusSync(payload: Payload): Promise<Coffee
         // цена и остаток берём по зерновому артикулу (молотый — та же фасовка)
         const linked = (variant.sku && byBarcode.get(variant.sku))
           || (variant.skuGround && byBarcode.get(variant.skuGround))
-        if (!linked) {
-          if (variant.isAvailable) anyAvailable = true
-          return variant
-        }
+        if (!linked) return variant
         const next = { ...variant }
         const nextPrice = linked.price ?? 0
         // Наличие определяется ценой: кофе жарится под заказ, складской остаток
@@ -109,20 +107,15 @@ export async function runCoffeeskladStatusSync(payload: Payload): Promise<Coffee
           changed = true
           result.availabilityUpdated++
         }
-        if (nextAvailable) anyAvailable = true
         return next
       })
 
-      const nextVisible = anyAvailable
-      if (Boolean(product.isVisible) !== nextVisible) {
-        changed = true
-        result.visibilityUpdated++
-      }
+      // product.isVisible намеренно не изменяем — видимостью управляет админка сайта.
       if (changed) {
         await payload.update({
           collection: "products",
           id: product.id,
-          data: { variants: nextVariants, isVisible: nextVisible } as Record<string, unknown>,
+          data: { variants: nextVariants } as Record<string, unknown>,
           overrideAccess: true,
         })
       }
@@ -132,7 +125,11 @@ export async function runCoffeeskladStatusSync(payload: Payload): Promise<Coffee
   }
 
   // ---------- 2. статусы заказов ----------
-  try {
+  // Отключено до полной настройки КофеСклад: статусы заказов на сайте задаёт
+  // МойСклад (moysklad status scheduler). Вернуть SYNC_ORDER_STATUSES = true,
+  // когда главенство над статусами перейдёт КофеСкладу.
+  const SYNC_ORDER_STATUSES: boolean = false
+  if (SYNC_ORDER_STATUSES) try {
     const res = await fetch(`${config.baseUrl}/api/public/orders-status`, { headers, signal: AbortSignal.timeout(20000) })
     if (!res.ok) throw new Error(`orders-status: HTTP ${res.status}`)
     const { orders } = await res.json() as { orders: CoffeeskladOrderStatus[] }

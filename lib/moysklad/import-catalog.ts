@@ -604,9 +604,6 @@ async function upsertProduct(params: {
   const variants = variantRows
     .map((row) => row.payload)
     .sort(compareImportedVariants)
-  const hasAvailableStock = useParentStockForVariants
-    ? parentHasAvailableStock
-    : variants.some((variant) => variant.isAvailable)
 
   if (useParentStockForVariants) {
     for (const row of variantRows) {
@@ -634,13 +631,15 @@ async function upsertProduct(params: {
     }
   }
   const slug = slugify(params.product.name || "product", `product-${shortId(productId)}`)
+  // isVisible здесь намеренно отсутствует: видимостью товара управляет только
+  // галочка «видим в каталоге» в админке сайта, независимо от остатков.
+  // При создании нового товара ниже выставляется isVisible = !archived.
   const accountingData = {
     name: params.product.name || "Товар",
     slug,
     moyskladId: productId,
     productTypeRef: params.productType.id,
     category: params.category.id,
-    isVisible: !params.product.archived && hasAvailableStock,
     variants,
   }
 
@@ -656,7 +655,6 @@ async function upsertProduct(params: {
     })
     params.stats.productsUpdated += 1
     params.stats.variantsImported += variants.length
-    if (!hasAvailableStock) params.stats.productsHidden += 1
     params.stats.variantsHidden += variants.filter((variant) => !variant.isAvailable).length
     return updated
   }
@@ -674,7 +672,6 @@ async function upsertProduct(params: {
     })
     params.stats.productsUpdated += 1
     params.stats.variantsImported += variants.length
-    if (!hasAvailableStock) params.stats.productsHidden += 1
     params.stats.variantsHidden += variants.filter((variant) => !variant.isAvailable).length
     return updated
   }
@@ -683,13 +680,15 @@ async function upsertProduct(params: {
     collection: "products",
     data: {
       ...accountingData,
+      // Новый товар по умолчанию виден (если не архивен в МойСклад);
+      // дальше видимостью управляет только админка сайта.
+      isVisible: !params.product.archived,
       detailsSchema,
       sortOrder: 0,
     },
   })
   params.stats.productsCreated += 1
   params.stats.variantsImported += variants.length
-  if (!hasAvailableStock) params.stats.productsHidden += 1
   params.stats.variantsHidden += variants.filter((variant) => !variant.isAvailable).length
   return created
 }
