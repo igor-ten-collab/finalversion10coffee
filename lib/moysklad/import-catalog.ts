@@ -489,21 +489,29 @@ function preserveVariantPackaging(
   existingVariants: PayloadProductDoc["variants"]
 ) {
   const existingByMoyskladId = new Map(
-    existingVariants
+    (existingVariants || [])
       .filter((variant) => getSyncedMoyskladId(variant))
       .map((variant) => [getSyncedMoyskladId(variant), variant])
   )
+
+  // Штрихкоды КофеСклад (EAN-13 с префиксом 200) принадлежат учёту обжарки:
+  // импорт из МойСклад не затирает ни их, ни skuGround.
+  const isCoffeeskladBarcode = (value?: string | null) => /^200\d{10}$/.test((value || "").trim())
 
   return variants.map((variant) => {
     const moyskladId = getSyncedMoyskladId(variant)
     const existing = moyskladId ? existingByMoyskladId.get(moyskladId) : undefined
     if (!existing) return variant
 
+    const existingSkuGround = (existing as { skuGround?: string | null }).skuGround ?? null
+
     // Packaging belongs to the site. Keep its row identity and manually entered
     // values when replacing the array, even if MoySklad renames or reorders it.
     return {
       ...variant,
       id: existing.id,
+      sku: isCoffeeskladBarcode(existing.sku) ? existing.sku : variant.sku,
+      skuGround: existingSkuGround,
       shippingLengthCm: existing.shippingLengthCm ?? null,
       shippingWidthCm: existing.shippingWidthCm ?? null,
       shippingHeightCm: existing.shippingHeightCm ?? null,

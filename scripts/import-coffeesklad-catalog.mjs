@@ -223,7 +223,29 @@ for (const product of products.values()) {
   }
   if (existingProducts.has(slug)) {
     const existing = existingProducts.get(slug)
-    await api("PATCH", `products/${existing.id}`, data)
+    const existingVariants = Array.isArray(existing.variants) ? existing.variants : []
+    if (existingVariants.length > 0) {
+      // Структуру существующих фасовок не пересоздаём (она может прийти из
+      // импорта МойСклад с привязками moyskladId): только обновляем штрихкоды
+      // КофеСклад и цены, сохраняя id строк и все чужие поля.
+      const merged = existingVariants.map((ev) => {
+        const w = ev.weightGrams ?? null
+        const isGroundVar = String(ev.name || "").toLowerCase().includes("молот")
+        const nv = variants.find((v) => (v.weightGrams ?? null) === w) || variants[0]
+        if (!nv) return ev
+        const next = { ...ev }
+        next.sku = (isGroundVar ? (nv.skuGround || nv.sku) : nv.sku) || ev.sku
+        next.skuGround = nv.skuGround || ev.skuGround || undefined
+        if (nv.price != null) {
+          next.price = nv.price
+          next.isAvailable = nv.price > 0
+        }
+        return next
+      })
+      await api("PATCH", `products/${existing.id}`, { ...data, variants: merged })
+    } else {
+      await api("PATCH", `products/${existing.id}`, data)
+    }
     updated++
   } else {
     await api("POST", "products", data)
