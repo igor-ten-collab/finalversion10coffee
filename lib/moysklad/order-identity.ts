@@ -49,12 +49,21 @@ export function assertRemoteInvoiceIdentity(
   }
 }
 
-export function assertRemoteOrderTotalsConsistent(remote: MoyskladCustomerOrder) {
+export function assertRemoteOrderTotalsConsistent(
+  remote: MoyskladCustomerOrder,
+  options: { allowPaidOverage?: boolean } = {},
+) {
   const sum = Number(remote.sum)
   // A document already overwritten with a smaller/new order can still carry
   // the old invoice/shipment/payment aggregates. Do not import its status or
   // overwrite it again while its financial links need investigation.
-  if (Number.isFinite(sum) && [remote.invoicedSum, remote.shippedSum, remote.payedSum]
+  if (!Number.isFinite(sum)) return
+  // Confirmed by the owner: for orders paid in full (payedSum covers the order
+  // sum) the paid amount is the source of truth — the excess comes from
+  // shipment/invoice corrections made in MoySklad after the order was placed.
+  // Read-only status sync may proceed for them; write paths keep the strict check.
+  if (options.allowPaidOverage && remote.payedSum !== undefined && Number(remote.payedSum) >= sum) return
+  if ([remote.invoicedSum, remote.shippedSum, remote.payedSum]
     .some(value => value !== undefined && Number(value) > sum + 1)) {
     throw new Error(`Заказ ${remote.name}: суммы связанных счетов, отгрузок или оплат превышают сумму заказа. Требуется сверка документов МойСклад`)
   }

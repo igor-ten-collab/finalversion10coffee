@@ -188,7 +188,7 @@ async function syncLinkedMoyskladOrderStatuses(payload: Payload, options: SyncOr
       const moyskladOrder = await fetchMoyskladOrder(moyskladCustomerOrderId)
       const channel = order.salesChannel === "retail" || (!order.salesChannel && order.customerType === "individual") ? "retail" : "wholesale"
       assertRemoteOrderIdentity(moyskladOrder, order, getMoyskladConfig(channel).organizationId, order.moyskladCounterpartyId)
-      assertRemoteOrderTotalsConsistent(moyskladOrder)
+      assertRemoteOrderTotalsConsistent(moyskladOrder, { allowPaidOverage: true })
       const nextStatus = mapMoyskladStateToOrderStatus(moyskladOrder.state?.name)
       if (!nextStatus) {
         throw new Error(`Неизвестный статус МойСклад: ${moyskladOrder.state?.name || "не указан"}`)
