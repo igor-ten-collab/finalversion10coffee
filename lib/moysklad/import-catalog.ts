@@ -479,7 +479,9 @@ function variantPayloadFromMoysklad(
     moyskladType,
     price: getPrimarySalePrice(item),
     weightGrams: inferWeightGrams(item.name || name),
-    isAvailable: options.isAvailableOverride ?? (getAssortmentStock(item) > 0),
+    // 12.11.2026: доступность не зависит от остатков — показом управляет
+    // только галочка «видим в каталоге» в админке.
+    isAvailable: options.isAvailableOverride ?? true,
     grindOptions: inferGrindOptions(item.name || ""),
   }
 }
@@ -590,7 +592,8 @@ async function upsertProduct(params: {
     detailsSchema === "coffee" &&
     params.variants.length > 0 &&
     params.variants.some((variant) => inferWeightGrams(variant.name || "") !== null)
-  const parentHasAvailableStock = getAssortmentStock(assortmentProduct) > 0
+  // 12.11.2026: остатки на видимость/доступность не влияют — всегда доступно.
+  const parentHasAvailableStock = true
 
   const sourceVariantRows = variantItems.map((item) => ({
     source: item,

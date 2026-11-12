@@ -221,6 +221,19 @@ export async function syncOrderToCoffeeskladById(
       ? DELIVERY_METHOD_LABELS[order.deliveryMethod] || order.deliveryMethod
       : ""
     const deliveryCost = numberValue(order.deliveryCost)
+    // 12.11.2026: платная доставка уходит в КофеСклад отдельной строкой-услугой,
+    // чтобы сумма заказа совпадала с сайтом и МойСклад (там доставка — позиция-услуга).
+    // Строки товаров уже уменьшены на orderFactor (total − доставка), поэтому
+    // итог заказа в КофеСклад сойдётся с сайтом до копейки.
+    if (deliveryCost > 0) {
+      webhookItems.push({
+        code: "",
+        name: "[Служебная] Доставка сайта 10coffee",
+        qty: 1,
+        price: deliveryCost,
+        vat_rate: vatRate,
+      })
+    }
     const delivery = [
       deliveryLabel,
       deliveryCost > 0 ? `${deliveryCost} ₽` : "",
