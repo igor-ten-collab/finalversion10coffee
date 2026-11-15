@@ -76,6 +76,10 @@ function round2(value: number) {
   return Math.round(value * 100) / 100
 }
 
+function round6(value: number) {
+  return Math.round(value * 1_000_000) / 1_000_000
+}
+
 function normalizeText(value?: string | null) {
   return (value || "").trim().toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ")
 }
@@ -93,9 +97,11 @@ function lineDiscountedUnitPrice(item: StoredOrderItem) {
   const unitPrice = numberValue(item.unitPrice)
   const totalPrice = numberValue(item.totalPrice) || unitPrice * qty
   const discountAmount = numberValue(item.discountAmount)
-  if (discountAmount > 0) return round2(Math.max(0, totalPrice - discountAmount) / qty)
+  // Сохраняем дробную цену с точностью до 6 знаков: итог строки после
+  // умножения на количество должен округлиться до той же копейки, что на сайте.
+  if (discountAmount > 0) return round6(Math.max(0, totalPrice - discountAmount) / qty)
   const discountPercent = Math.max(0, Math.min(100, numberValue(item.discountPercent)))
-  if (discountPercent > 0) return round2(unitPrice * (1 - discountPercent / 100))
+  if (discountPercent > 0) return round6(unitPrice * (1 - discountPercent / 100))
   return round2(unitPrice)
 }
 
@@ -212,7 +218,9 @@ export async function syncOrderToCoffeeskladById(
         code: String(sku || "").trim(),
         name: `${productName} ${variantName}${grindLabel}`.trim(),
         qty,
-        price: round2(price * orderFactor),
+        price: round6(price * orderFactor),
+        base_price: round2(numberValue(item.unitPrice)),
+        discount_pct: Math.max(0, Math.min(100, numberValue(item.discountPercent))),
         vat_rate: vatRate,
       }
     })
@@ -231,6 +239,8 @@ export async function syncOrderToCoffeeskladById(
         name: "[Служебная] Доставка сайта 10coffee",
         qty: 1,
         price: deliveryCost,
+        base_price: deliveryCost,
+        discount_pct: 0,
         vat_rate: vatRate,
       })
     }
