@@ -465,21 +465,23 @@ function AddButton({
   }
 
   return (
-    <div className="flex items-center gap-0.5">
-      <button
-        onClick={decrement}
-        className="flex h-6 w-6 items-center justify-center rounded-full border border-[#5b328a]/30 text-[#5b328a] hover:bg-[#5b328a]/10 transition-colors"
-      >
-        <Minus className="h-2.5 w-2.5" />
-      </button>
-      <span className="w-5 text-center text-[11px] font-bold text-[#5b328a] tabular-nums">{cartQty}</span>
-      <button
-        onClick={increment}
-        className="flex h-6 w-6 items-center justify-center rounded-full bg-[#5b328a] text-white hover:bg-[#4a2870] transition-colors"
-      >
-        <Plus className="h-2.5 w-2.5" />
-      </button>
-      {label && <span className="text-[9px] text-neutral-400 ml-0.5">{label}</span>}
+    <div className="flex flex-col items-center gap-0.5">
+      <div className="flex items-center gap-0.5">
+        <button
+          onClick={decrement}
+          className="flex h-6 w-6 items-center justify-center rounded-full border border-[#5b328a]/30 text-[#5b328a] hover:bg-[#5b328a]/10 transition-colors"
+        >
+          <Minus className="h-2.5 w-2.5" />
+        </button>
+        <span className="w-5 text-center text-[11px] font-bold text-[#5b328a] tabular-nums">{cartQty}</span>
+        <button
+          onClick={increment}
+          className="flex h-6 w-6 items-center justify-center rounded-full bg-[#5b328a] text-white hover:bg-[#4a2870] transition-colors"
+        >
+          <Plus className="h-2.5 w-2.5" />
+        </button>
+      </div>
+      {label && <span className="text-[9px] text-neutral-400">{label}</span>}
     </div>
   )
 }
