@@ -775,6 +775,16 @@ export async function createOrder(params: {
     data: orderData,
   }) as PayloadOrderDoc
 
+  // КофеСклад — основная учётная система: отправляем сохранённый заказ сразу,
+  // до МойСклад, писем и прочих необязательных действий, чтобы их сбой или
+  // зависание не могли оставить заказ только на сайте.
+  const coffeeskladSync = await syncOrderToCoffeeskladById(payload, doc.id)
+  if (coffeeskladSync.error) {
+    console.error(`[Order ${doc.orderId || doc.id}] Не удалось выгрузить заказ в КофеСклад: ${coffeeskladSync.error}`)
+  } else if (coffeeskladSync.skipped) {
+    console.warn(`[Order ${doc.orderId || doc.id}] Выгрузка в КофеСклад пропущена`)
+  }
+
   // Also populate order_items Supabase table (reliable source for repeat orders)
   const orderItemsRows = cartItems.map((item) => {
     const lineSubtotal = (item.variant?.price ?? 0) * item.quantity
@@ -906,10 +916,6 @@ export async function createOrder(params: {
   }
 
   revalidatePath("/dashboard")
-
-  // Выгрузка в КофеСклад (основная учётная система). Идёт независимо от
-  // результата МойСклад и никогда не отменяет оформление заказа.
-  await syncOrderToCoffeeskladById(payload, doc.id)
 
   return { success: true, orderId: String(doc.id), moyskladInvoiceCreated: hasMoyskladInvoice }
 }
