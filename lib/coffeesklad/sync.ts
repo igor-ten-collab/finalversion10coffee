@@ -214,13 +214,23 @@ export async function syncOrderToCoffeeskladById(
       const productName = item.productName || product?.name || "Товар"
       const variantName = item.variantName || variant?.name || ""
       const grindLabel = grind === "ground" ? ", молотый" : ""
+      const siteBase = round2(numberValue(item.unitPrice))
+      const declaredDiscount = Math.max(0, Math.min(100, numberValue(item.discountPercent)))
+      const itemFactor = declaredDiscount > 0
+        ? 1 - declaredDiscount / 100
+        : siteBase > 0
+          ? Math.max(0, Math.min(1, price / siteBase))
+          : 1
+      const effectiveDiscount = round2(
+        Math.max(0, Math.min(100, (1 - itemFactor * orderFactor) * 100)),
+      )
       return {
         code: String(sku || "").trim(),
         name: `${productName} ${variantName}${grindLabel}`.trim(),
         qty,
         price: round6(price * orderFactor),
-        base_price: round2(numberValue(item.unitPrice)),
-        discount_pct: Math.max(0, Math.min(100, numberValue(item.discountPercent))),
+        base_price: siteBase,
+        discount_pct: effectiveDiscount,
         vat_rate: vatRate,
       }
     })
