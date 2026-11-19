@@ -8,6 +8,7 @@
 
 import type { Payload } from "payload"
 import { getCoffeeskladConfig, isCoffeeskladReady } from "./config"
+import { cancelOrderInCoffeesklad } from "./cancel"
 import { DELIVERY_METHOD_LABELS } from "@/lib/utils/constants"
 import type { DeliveryMethod } from "@/types"
 
@@ -313,6 +314,26 @@ export async function syncOrderToCoffeeskladById(
       coffeeskladSyncedAt: new Date().toISOString(),
       coffeeskladSyncError: "",
     })
+
+    // Гонка: пока шла выгрузка, заказ могли отменить на сайте (в статусе
+    // pending перехват отмены в хуках не срабатывает). Перечитываем заказ
+    // и, если он уже отменён, догоняем отмену в КофеСклад.
+    try {
+      const fresh = await payload.findByID({
+        collection: "orders",
+        id: orderId,
+        depth: 0,
+        overrideAccess: true,
+      }) as StoredOrder
+      if (fresh.status === "cancelled") {
+        await cancelOrderInCoffeesklad(payload, fresh, "cancel")
+      }
+    } catch (raceError) {
+      console.error(
+        `[Coffeesklad] Заказ ${order.orderId || order.id}: не удалось проверить отмену после выгрузки —`,
+        raceError instanceof Error ? raceError.message : raceError,
+      )
+    }
 
     if (result?.unmatched_items?.length) {
       console.warn(

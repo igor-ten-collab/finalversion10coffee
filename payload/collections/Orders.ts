@@ -8,6 +8,7 @@ import { canReadOperations, canRunIntegrations, getAllowedSalesChannels, operati
 import { orderWorkspaceBaseFilter } from "../admin/workspace"
 import { accrueLoyaltyForDeliveredOrder, releaseLoyaltyReservation, reverseLoyaltyForReturnedOrder } from "@/lib/loyalty"
 import { sendCdekTrackingEmail } from "@/lib/cdek-tracking-email"
+import { cancelOrderInCoffeesklad } from "@/lib/coffeesklad/cancel"
 
 async function generateSequentialOrderId() {
   const nextResult = await dbQuery<{ next_number: number }>(
@@ -276,6 +277,38 @@ export const Orders: CollectionConfig = {
             "Не удалось выполнить возврат баллов",
             () => reverseLoyaltyForReturnedOrder(req.payload, doc as Record<string, unknown>),
           )
+        }
+
+        // КофеСклад: догоняем отмену/восстановление заказа в учёте.
+        // Пропускаем, если сами инициировали это сохранение из cancel.ts
+        // (context-флаг против рекурсии, как moyskladStatusSync выше),
+        // и если заказ не выгружался в КофеСклад (pending/disabled — отменять нечего).
+        if (!req.context?.coffeeskladCancelSync) {
+          const syncedToCoffeesklad = ["synced", "error"].includes(String(doc.coffeeskladSyncStatus || ""))
+          if (
+            syncedToCoffeesklad
+            && doc.status === "cancelled"
+            && previousDoc?.status
+            && previousDoc.status !== "cancelled"
+          ) {
+            await runLoyaltySideEffect(
+              "Не удалось передать отмену заказа в КофеСклад",
+              () => cancelOrderInCoffeesklad(req.payload, doc, "cancel"),
+            )
+          }
+          // Воскрешение: beforeChange возвращает заказ в «Оплачен», когда
+          // ЮKassa подтверждает оплату отменённого заказа. Здесь ловим факт
+          // перехода cancelled → paid и возвращаем заказ в КофеСклад в «Новый».
+          if (
+            syncedToCoffeesklad
+            && previousDoc?.status === "cancelled"
+            && doc.status === "paid"
+          ) {
+            await runLoyaltySideEffect(
+              "Не удалось передать восстановление заказа в КофеСклад",
+              () => cancelOrderInCoffeesklad(req.payload, doc, "restore"),
+            )
+          }
         }
       },
     ],
