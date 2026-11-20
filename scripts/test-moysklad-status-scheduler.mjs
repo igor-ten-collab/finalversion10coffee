@@ -111,10 +111,6 @@ function startupFixture() {
       events.push(['server', binary, args, options.env.MOYSKLAD_ENABLED])
       return server
     },
-    startScheduler: ({ env }) => {
-      events.push(['scheduler', env.MOYSKLAD_ENABLED])
-      return () => { events.push(['stop']) }
-    },
     startPaymentScheduler: () => {
       events.push(['payment-scheduler'])
       return () => { events.push(['stop-payments']) }
@@ -123,7 +119,7 @@ function startupFixture() {
   return { start, appProcess, server, events }
 }
 
-test('npm start loads the production environment and starts both Next and status scheduler', () => {
+test('npm start loads the production environment and starts Next with payment scheduler', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
   assert.equal(pkg.scripts.start, 'node scripts/start-with-status-sync.mjs')
   const f = startupFixture()
@@ -131,11 +127,10 @@ test('npm start loads the production environment and starts both Next and status
   assert.deepEqual(f.events, [
     ['env', '/app', 'production'],
     ['server', 'node', ['node_modules/next/dist/bin/next', 'start', '-p', '3099'], 'true'],
-    ['scheduler', 'true'],
     ['payment-scheduler'],
   ])
   f.appProcess.emit('SIGTERM')
-  assert.deepEqual(f.events.slice(-3), [['stop'], ['stop-payments'], ['kill', 'SIGTERM']])
+  assert.deepEqual(f.events.slice(-2), [['stop-payments'], ['kill', 'SIGTERM']])
   f.server.emit('exit', 0, null)
   assert.equal(f.appProcess.exitCode, 0)
   assert.equal(f.appProcess.listenerCount('SIGTERM'), 0)
@@ -147,6 +142,6 @@ test('failed Next startup stops the scheduler and preserves the failing exit cod
   f.server.emit('error', new Error('startup failed'))
   assert.equal(f.appProcess.exitCode, 1)
   assert.equal(f.appProcess.listenerCount('SIGINT'), 0)
-  assert.ok(f.events.some(event => event[0] === 'stop'))
+  assert.ok(f.events.some(event => event[0] === 'stop-payments'))
   assert.deepEqual(f.events.at(-1), ['error', '[Next.js]', 'startup failed'])
 })
