@@ -12,8 +12,10 @@ export default function VideoHero() {
           muted
           loop
           playsInline
+          preload="metadata"
+          poster="/hero-burner-v2.jpg"
         >
-          <source src="/10coffee-hero.mp4" type="video/mp4" />
+          <source src="/hero-burner-v2.mp4" type="video/mp4" />
         </video>
       </div>
 
@@ -21,10 +23,10 @@ export default function VideoHero() {
 
       <div className={styles.heroContainer}>
         <Copy type="words" animateOnScroll={false} delay={0.85}>
-          <h2>Мы не делаем шаблонов</h2>
+          <h1>Свежеобжаренный кофе из Сочи</h1>
         </Copy>
         <Copy type="words" animateOnScroll={false} delay={1.1}>
-          <p className={styles.heroSub}>Мы создаем уникальный продукт</p>
+          <p className={styles.heroSub}>Оптовая платформа и интернет-магазин кофе, чая и аксессуаров с доставкой по всей России</p>
         </Copy>
       </div>
     </section>

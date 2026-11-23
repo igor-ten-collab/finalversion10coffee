@@ -77,6 +77,10 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/:path*.mp4",
+        headers: longCacheHeaders,
+      },
+      {
         source: "/media/:path*",
         headers: longCacheHeaders,
       },

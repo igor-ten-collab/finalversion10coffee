@@ -50,9 +50,9 @@
   margin: 0 auto;
 }
 
-.heroContainer h2 {
+.heroContainer h1 {
   color: #ffffff;
-  font-size: 8rem;
+  font-size: 3rem;
   max-width: 90%;
 }
 
@@ -64,12 +64,12 @@
 }
 
 @media (max-width: 1440px) {
-  .heroContainer h2 { font-size: 6rem; }
+  .heroContainer h1 { font-size: 3rem; }
   .heroSub { font-size: 1.5rem !important; }
 }
 
 @media (max-width: 1366px) {
-  .heroContainer h2 { font-size: 5rem; }
+  .heroContainer h1 { font-size: 2.75rem; }
   .heroSub { font-size: 1.25rem !important; }
 }
 
@@ -79,15 +79,15 @@
     gap: 1rem;
   }
 
-  .heroContainer h2 {
+  .heroContainer h1 {
     max-width: 100%;
-    font-size: 4rem;
+    font-size: 2.5rem;
   }
 
   .heroSub { font-size: 1.125rem !important; }
 }
 
 @media (max-width: 600px) {
-  .heroContainer h2 { font-size: 3rem; }
+  .heroContainer h1 { font-size: 2rem; }
   .heroSub { font-size: 1rem !important; }
 }
