@@ -57,6 +57,15 @@ function isMainSiteContentPath(pathname: string) {
   return MAIN_SITE_CONTENT_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))
 }
 
+// Shop catalog pages have one canonical host: shop.10coffee.ru. The same app
+// also answers on 10coffee.ru, so without this redirect every product and
+// category exists twice for search engines.
+const SHOP_CATALOG_PATHS = ["/shop", "/kofe", "/chay", "/aksessuary", "/khimiya", "/himiya"]
+
+function isShopCatalogPath(pathname: string) {
+  return SHOP_CATALOG_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
   const hostname = getHostname(request)
@@ -71,6 +80,15 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.protocol = "https:"
     url.hostname = "10coffee.ru"
+    url.port = ""
+    return NextResponse.redirect(url, 308)
+  }
+
+  // Mirror of the rule above: catalog URLs on the main domain are duplicates.
+  if ((hostname === "10coffee.ru" || hostname === "www.10coffee.ru") && isShopCatalogPath(pathname)) {
+    const url = request.nextUrl.clone()
+    url.protocol = "https:"
+    url.hostname = "shop.10coffee.ru"
     url.port = ""
     return NextResponse.redirect(url, 308)
   }

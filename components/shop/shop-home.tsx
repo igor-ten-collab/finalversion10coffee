@@ -38,6 +38,7 @@ export function ShopHome({ products, productTypes, faqs, favoriteIds = [] }: { p
   return (
     <main className="min-h-screen bg-[#f8f5f1] text-[#1d1d1b]">
       <ShopHeader products={products} productTypes={productTypes} />
+      <h1 className="sr-only">Интернет-магазин свежеобжаренного кофе, чая и аксессуаров 10coffee</h1>
 
       <section id="categories" className="mx-auto max-w-[1480px] scroll-mt-28 px-5 pb-24 pt-8 lg:px-10 lg:pt-12">
         <div className="grid items-stretch gap-5 lg:grid-cols-12 lg:grid-rows-[auto_1fr]">
