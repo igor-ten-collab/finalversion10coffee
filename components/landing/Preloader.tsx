@@ -33,13 +33,21 @@ interface PreloaderProps {
 export default function Preloader({ onAnimationComplete }: PreloaderProps) {
   const lenis = useLenis();
 
-  const [isVisible, setIsVisible] = useState(() => !hasSeenPreloader());
-  const [isScrollLocked, setIsScrollLocked] = useState(
-    () => !hasSeenPreloader(),
-  );
+  // SSR-гидрация: на сервере и при первом клиентском рендере прелоадер
+  // не выводится (null), иначе sessionStorage даёт рассинхрон HTML↔state.
+  // Решение о показе принимаем только после монтирования.
+  const [isVisible, setIsVisible] = useState(false);
+  const [isScrollLocked, setIsScrollLocked] = useState(false);
   const [progress, setProgress] = useState(0);
   const [hasFinishedLoading, setHasFinishedLoading] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
+
+  useEffect(() => {
+    if (!hasSeenPreloader()) {
+      setIsVisible(true);
+      setIsScrollLocked(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isScrollLocked) {

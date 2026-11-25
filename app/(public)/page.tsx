@@ -1,19 +1,13 @@
-"use client"
+import type { Metadata } from "next"
+import LenisProvider from "@/components/landing/LenisProvider"
+import GSAPRegistry from "@/components/landing/GSAPRegistry"
+import LandingPage from "@/components/landing/LandingPage"
 
-import dynamic from "next/dynamic"
-
-const LenisProvider = dynamic(
-  () => import("@/components/landing/LenisProvider"),
-  { ssr: false },
-)
-const GSAPRegistry = dynamic(
-  () => import("@/components/landing/GSAPRegistry"),
-  { ssr: false },
-)
-const LandingPage = dynamic(
-  () => import("@/components/landing/LandingPage"),
-  { ssr: false },
-)
+export const metadata: Metadata = {
+  description:
+    "Оптовая платформа и интернет-магазин свежеобжаренного кофе, чая и аксессуаров из Сочи. Обжарка под заказ, доставка по всей России.",
+  alternates: { canonical: "https://10coffee.ru/" },
+}
 
 export default function Page() {
   return (
