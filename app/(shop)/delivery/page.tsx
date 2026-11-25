@@ -19,7 +19,7 @@ export default async function DeliveryPage() {
         <p className="text-xs font-black uppercase tracking-[0.22em] text-[#e6610d]">Покупателям</p>
         <h1 className="mt-4 text-4xl font-black tracking-[-0.04em] sm:text-6xl">Доставка и оплата</h1>
         <p className="mt-6 max-w-3xl text-lg leading-8 text-[#6e655e]">
-          Мы доставляем физические товары по России и выдаём заказы самостоятельно в Сочи. Доступный способ получения покупатель выбирает при оформлении заказа.
+          Мы доставляем заказы по всей России. В Сочи доступен самовывоз. Выберите удобный способ получения при оформлении заказа.
         </p>
 
         <div className="mt-12 grid gap-5 md:grid-cols-3">
