@@ -240,6 +240,17 @@ export async function syncOrderToCoffeeskladById(
       ? DELIVERY_METHOD_LABELS[order.deliveryMethod] || order.deliveryMethod
       : ""
     const deliveryCost = numberValue(order.deliveryCost)
+    // 27.11.2026: копеечная поправка. Построчные скидки сайта округляются до
+    // целых рублей, поэтому сумма строк может разойтись с итогом заказа
+    // (пример: 10C-00598 — построчно 388 ₽ против 387 ₽ скидки заказа, Δ1 ₽).
+    // orderFactor ограничен сверху 1 и не может увеличить строки, поэтому
+    // остаток доначисляем на последнюю товарную строку (цена с 6 знаками).
+    const goodsLinesSum = round2(webhookItems.reduce((s, l) => s + l.price * l.qty, 0))
+    const residual = round2(goodsTarget - goodsLinesSum)
+    if (Math.abs(residual) >= 0.005 && webhookItems.length > 0) {
+      const last = webhookItems[webhookItems.length - 1]
+      last.price = round6(last.price + residual / (last.qty || 1))
+    }
     // 12.11.2026: платная доставка уходит в КофеСклад отдельной строкой-услугой,
     // чтобы сумма заказа совпадала с сайтом и МойСклад (там доставка — позиция-услуга).
     // Строки товаров уже уменьшены на orderFactor (total − доставка), поэтому
