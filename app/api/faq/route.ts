@@ -5,8 +5,8 @@ import configPromise from "@payload-config"
 
 const questionSchema = z.object({
   question: z.string().trim().min(10, "Опишите вопрос чуть подробнее").max(1000),
-  name: z.string().trim().max(120).optional().or(z.literal("")),
-  email: z.string().trim().email("Укажите корректный email").max(254).optional().or(z.literal("")),
+  name: z.string().trim().min(2, "Укажите имя").max(120),
+  email: z.string().trim().email("Укажите корректный email").max(254),
   consent: z.literal(true, { error: "Подтвердите согласие на обработку персональных данных" }),
 })
 

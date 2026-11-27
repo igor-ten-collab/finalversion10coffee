@@ -53,8 +53,8 @@ export function FaqQuestionForm() {
         <form onSubmit={onSubmit} className="mt-5 grid gap-3 rounded-2xl border border-black/[0.09] bg-white p-4 shadow-sm">
           <textarea name="question" required minLength={10} maxLength={1000} rows={4} placeholder="Напишите ваш вопрос" className="w-full resize-y rounded-xl border border-black/[0.12] bg-[#f8f5f1] px-3 py-2.5 text-sm outline-none transition focus:border-[#5b328a]" />
           <div className="grid gap-3 sm:grid-cols-2">
-            <input name="name" maxLength={120} placeholder="Имя (необязательно)" className="min-w-0 rounded-xl border border-black/[0.12] bg-[#f8f5f1] px-3 py-2.5 text-sm outline-none transition focus:border-[#5b328a]" />
-            <input name="email" type="email" maxLength={254} placeholder="Email для ответа (необязательно)" className="min-w-0 rounded-xl border border-black/[0.12] bg-[#f8f5f1] px-3 py-2.5 text-sm outline-none transition focus:border-[#5b328a]" />
+            <input name="name" required minLength={2} maxLength={120} placeholder="Имя (обязательно)" className="min-w-0 rounded-xl border border-black/[0.12] bg-[#f8f5f1] px-3 py-2.5 text-sm outline-none transition focus:border-[#5b328a]" />
+            <input name="email" type="email" required maxLength={254} placeholder="Email для ответа (обязательно)" className="min-w-0 rounded-xl border border-black/[0.12] bg-[#f8f5f1] px-3 py-2.5 text-sm outline-none transition focus:border-[#5b328a]" />
           </div>
           <label className="flex cursor-pointer items-start gap-2 rounded-xl bg-[#f8f5f1] p-3">
             <input name="consent" type="checkbox" required className="mt-0.5 h-4 w-4 shrink-0 accent-[#5b328a]" />
