@@ -25,6 +25,7 @@ import { BlogPosts } from "./payload/collections/BlogPosts"
 import { CoffeeBrewingGuides } from "./payload/collections/CoffeeBrewingGuides"
 import { Tags } from "./payload/collections/Tags"
 import { PriceListRequests } from "./payload/collections/PriceListRequests"
+import { ContactRequests } from "./payload/collections/ContactRequests"
 import { Faqs } from "./payload/collections/Faqs"
 import { SiteSettings } from "./payload/globals/SiteSettings"
 import { PaymentSettings } from "./payload/globals/PaymentSettings"
@@ -82,6 +83,7 @@ export default buildConfig({
   collections: [
     Orders,
     PriceListRequests,
+    ContactRequests,
     JobApplications,
     Faqs,
     PromoCodes,

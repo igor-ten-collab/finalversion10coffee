@@ -69,6 +69,7 @@ export interface Config {
   collections: {
     orders: Order;
     'price-list-requests': PriceListRequest;
+    'contact-requests': ContactRequest;
     'job-applications': JobApplication;
     faqs: Faq;
     'promo-codes': PromoCode;
@@ -101,6 +102,7 @@ export interface Config {
   collectionsSelect: {
     orders: OrdersSelect<false> | OrdersSelect<true>;
     'price-list-requests': PriceListRequestsSelect<false> | PriceListRequestsSelect<true>;
+    'contact-requests': ContactRequestsSelect<false> | ContactRequestsSelect<true>;
     'job-applications': JobApplicationsSelect<false> | JobApplicationsSelect<true>;
     faqs: FaqsSelect<false> | FaqsSelect<true>;
     'promo-codes': PromoCodesSelect<false> | PromoCodesSelect<true>;
@@ -798,6 +800,23 @@ export interface PriceListRequest {
   createdAt: string;
 }
 /**
+ * Сообщения посетителей через форму «Написать нам»
+ *
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "contact-requests".
+ */
+export interface ContactRequest {
+  id: number;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  message: string;
+  consent: boolean;
+  source?: string | null;
+  updatedAt: string;
+  createdAt: string;
+}
+/**
  * Отклики и кадровый резерв 10coffee
  *
  * This interface was referenced by `Config`'s JSON-Schema
@@ -1113,6 +1132,10 @@ export interface PayloadLockedDocument {
         value: number | PriceListRequest;
       } | null)
     | ({
+        relationTo: 'contact-requests';
+        value: number | ContactRequest;
+      } | null)
+    | ({
         relationTo: 'job-applications';
         value: number | JobApplication;
       } | null)
@@ -1320,6 +1343,20 @@ export interface PriceListRequestsSelect<T extends boolean = true> {
   phone?: T;
   company?: T;
   emailSent?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "contact-requests_select".
+ */
+export interface ContactRequestsSelect<T extends boolean = true> {
+  name?: T;
+  email?: T;
+  phone?: T;
+  message?: T;
+  consent?: T;
+  source?: T;
   updatedAt?: T;
   createdAt?: T;
 }

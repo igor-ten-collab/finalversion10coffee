@@ -8,6 +8,7 @@ import { openAuthModal } from "@/components/auth/auth-modal-store";
 import Copy from "./_shared/Copy";
 import AnimatedButton from "./_shared/AnimatedButton";
 import PriceListFormModal from "./PriceListFormModal";
+import ContactFormModal from "./ContactFormModal";
 import styles from "./LandingFooter.module.css";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -30,6 +31,7 @@ export default function LandingFooter() {
   const sectionRef = useRef<HTMLElement>(null);
   const buttonContainerRef = useRef<HTMLDivElement>(null);
   const [showPriceModal, setShowPriceModal] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
   const circleButtonRef = useRef<HTMLDivElement>(null);
   const circlePathRef = useRef<SVGPathElement>(null);
 
@@ -124,7 +126,13 @@ export default function LandingFooter() {
               </div>
             </div>
           </div>
-          <AnimatedButton href="mailto:10coffee@mail.ru">
+          <AnimatedButton
+            href="#contact-form"
+            onClick={(event) => {
+              event.preventDefault();
+              setShowContactModal(true);
+            }}
+          >
             Написать нам
           </AnimatedButton>
         </div>
@@ -189,6 +197,7 @@ export default function LandingFooter() {
         </div>
       </div>
       <PriceListFormModal isOpen={showPriceModal} onClose={() => setShowPriceModal(false)} />
+      <ContactFormModal isOpen={showContactModal} onClose={() => setShowContactModal(false)} />
     </footer>
   );
 }

@@ -37,6 +37,7 @@ import * as migration_20260831_130000_paid_order_cart_cleanup from './20260831_1
 import * as migration_20260902_150000_client_promo_codes from './20260902_150000_client_promo_codes.ts';
 import * as migration_20260902_170000_product_brewing_guide_selection from './20260902_170000_product_brewing_guide_selection.ts';
 import * as migration_20261110_120000_coffeesklad_integration from './20261110_120000_coffeesklad_integration.ts';
+import * as migration_20261128_120000_contact_requests from './20261128_120000_contact_requests.ts';
 
 export const migrations = [
   {
@@ -233,5 +234,10 @@ export const migrations = [
     up: migration_20261110_120000_coffeesklad_integration.up,
     down: migration_20261110_120000_coffeesklad_integration.down,
     name: '20261110_120000_coffeesklad_integration'
+  },
+  {
+    up: migration_20261128_120000_contact_requests.up,
+    down: migration_20261128_120000_contact_requests.down,
+    name: '20261128_120000_contact_requests'
   },
 ];
