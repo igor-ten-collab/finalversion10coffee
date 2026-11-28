@@ -9,6 +9,7 @@ import { orderWorkspaceBaseFilter } from "../admin/workspace"
 import { accrueLoyaltyForDeliveredOrder, releaseLoyaltyReservation, reverseLoyaltyForReturnedOrder } from "@/lib/loyalty"
 import { sendCdekTrackingEmail } from "@/lib/cdek-tracking-email"
 import { cancelOrderInCoffeesklad } from "@/lib/coffeesklad/cancel"
+import { syncOrderToCoffeeskladById } from "@/lib/coffeesklad/sync"
 
 async function generateSequentialOrderId() {
   const nextResult = await dbQuery<{ next_number: number }>(
@@ -225,7 +226,7 @@ export const Orders: CollectionConfig = {
       },
     ],
     afterChange: [
-      async ({ doc, previousDoc, req }) => {
+      async ({ doc, previousDoc, req, operation }) => {
         if (previousDoc && doc.status !== previousDoc.status) {
           console.log(`[Order ${doc.orderId}] Status: ${previousDoc.status} → ${doc.status}`)
         }
@@ -258,6 +259,23 @@ export const Orders: CollectionConfig = {
               error instanceof Error ? error.message : error,
             )
           }
+        }
+
+        // Admin/API creation has no server action around it, so export here.
+        // Existing wholesale checkout sets the context flag and keeps its
+        // direct export; unpaid retail still waits for YooKassa confirmation.
+        if (
+          operation === "create"
+          && !req.context?.coffeeskladCreateSync
+          && (doc.salesChannel === "wholesale" || doc.paymentStatus === "paid")
+        ) {
+          await runLoyaltySideEffect(
+            "Не удалось выгрузить созданный заказ в КофеСклад",
+            async () => {
+              const sync = await syncOrderToCoffeeskladById(req.payload, doc.id)
+              if (sync.error) throw new Error(sync.error)
+            },
+          )
         }
 
         if (doc.status === "delivered") {

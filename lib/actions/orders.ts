@@ -773,6 +773,9 @@ export async function createOrder(params: {
   const doc = await payload.create({
     collection: "orders",
     data: orderData,
+    // This action performs the direct export below. The generic create hook
+    // covers admin/API creation and must not send the same checkout twice.
+    context: { coffeeskladCreateSync: true },
   }) as PayloadOrderDoc
 
   // КофеСклад — основная учётная система: отправляем сохранённый заказ сразу,

@@ -15,8 +15,10 @@ test('Coffeesklad export runs immediately after order creation even if Moysklad 
       assert.equal(collection, 'clients')
       return { docs: [{ id: 10, fullName: 'Test', email: 'test@example.invalid', discountPercent: 0 }] }
     },
-    create: async ({ collection }) => {
+    create: async ({ collection, context }) => {
       assert.equal(collection, 'orders')
+      assert.equal(context?.coffeeskladCreateSync, true,
+        'The afterChange hook must leave this existing direct export to the checkout action')
       events.push('create')
       return order
     },
